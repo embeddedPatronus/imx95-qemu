@@ -40,6 +40,12 @@ config I2C_ECHO
     default y if TEST_DEVICES
     depends on I2C
 
+config PF09_PMIC
+    bool
+
+config PF53_PMIC
+    bool
+
 config PL310
     bool
 
@@ -302,4 +308,64 @@ config SOPHGO_CV1800B_CLK
 source macio/Kconfig
 
 config QCOM_QDSP6SS_CLK
+    bool
+
+config IMX95_CCM
+    bool
+
+config IMX95_BBNSM
+    bool
+
+config IMX95_FRACTPLL
+    bool
+
+config IMX95_TMPSNS
+    bool
+
+config IMX95_SMMUV3
+    bool
+
+config IMX95_FSPI
+    bool
+
+config IMX95_SRC_GEN
+    bool
+
+config IMX95_ADC
+    bool
+
+config IMX95_GPIO
+    bool
+
+config IMX95_WDOG32
+    bool
+
+config IMX95_TPM_PWM
+    bool
+
+config IMX95_BLK_CTRL_S_AONMIX
+    bool
+
+config IMX95_ELE_MU
+    bool
+
+config IMX95_SC_MU
+    bool
+
+config IMX95_V2X_DBG_MU
+    bool
+
+config IMX95_HSIO_BLK_CTRL
+    bool
+
+config IMX95_CAMERA_CSR
+    bool
+
+config IMX95_CAMERA_NOC
+    bool
+
+config IMX95_PCIE_SERDES_SS
+    bool
+
+config IMX95_NETC_ECAM
     bool

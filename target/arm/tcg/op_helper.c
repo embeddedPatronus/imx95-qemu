@@ -18,6 +18,7 @@
  */
 #include "qemu/osdep.h"
 #include "qemu/main-loop.h"
+#include "hw/core/irq.h"
 #include "cpu.h"
 #include "exec/target_page.h"
 #include "helper.h"
@@ -379,6 +380,19 @@ void HELPER(wfi)(CPUARMState *env, uint32_t insn_len)
     CPUState *cs = env_cpu(env);
     uint32_t excp;
     int target_el = check_wfx_trap(env, false, &excp);
+
+    if (!target_el && (env->cp15.impdef_regs[ARM_IMPDEF_A55_CPUPWRCTLR] & 1)) {
+        ARMCPU *pcpu = env_archcpu(env);
+
+        arm_set_cpu_power_state(pcpu, PSCI_OFF);
+        cs->exception_index = EXCP_HLT;
+        cs->halted = 1;
+        {
+            BQL_LOCK_GUARD();
+            qemu_set_irq(pcpu->wfi_powerdown, 1);
+        }
+        cpu_loop_exit(cs);
+    }
 
     if (cpu_has_work(cs)) {
         /* Don't bother to go into our "low power state" if

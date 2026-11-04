@@ -524,6 +524,10 @@ typedef struct CPUArchState {
          * by pmccntr_op_start/pmccntr_op_finish to guarantee the latest
          * architecturally-correct value is being read/set.
          */
+        /* Implementation-defined system registers of cores that define a few (Cortex-A55) */
+        uint64_t impdef_regs[16];
+        /* indices into impdef_regs[] */
+#define ARM_IMPDEF_A55_CPUPWRCTLR 2
         uint64_t c15_ccnt;
         /* Stores the delta between the architectural value and the underlying
          * cycle count during normal operation. It is used to update c15_ccnt
@@ -995,6 +999,8 @@ struct ArchCPU {
     qemu_irq gicv3_maintenance_interrupt;
     /* GPIO output for the PMU interrupt */
     qemu_irq pmu_interrupt;
+    /* GPIO output: the core entered a power-down WFI (e.g. Cortex-A55 CPUPWRCTLR_EL1.CORE_PWRDN_EN) */
+    qemu_irq wfi_powerdown;
 
     /* MemoryRegion to use for secure physical accesses */
     MemoryRegion *secure_memory;
@@ -1140,6 +1146,12 @@ struct ArchCPU {
      * consistent manner in isar.idregs[MPIDR_EL1_IDX].
      */
     uint64_t mp_affinity;
+    /*
+     * Set MPIDR_EL1.MT for topologies where Aff1 identifies cores and Aff0 is
+     * the lowest affinity level. MT is a topology attribute, not part of the
+     * affinity value itself.
+     */
+    bool mpidr_mt;
     uint64_t reset_cbar;
     uint32_t reset_auxcr;
     bool reset_hivecs;

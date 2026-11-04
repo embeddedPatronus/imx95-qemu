@@ -35,7 +35,7 @@
 #define USB_DWC3(obj) \
      OBJECT_CHECK(USBDWC3, (obj), TYPE_USB_DWC3)
 
-#define USB_DWC3_R_MAX (0x600 / 4)
+#define USB_DWC3_R_MAX (0x624 / 4)
 #define DWC3_SIZE 0x10000
 
 typedef struct USBDWC3 {

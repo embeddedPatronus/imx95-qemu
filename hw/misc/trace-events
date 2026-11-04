@@ -474,3 +474,17 @@ restore_host_x86_igvm(void) ""
 # tt_atlantis_prcm.c
 tt_atlantis_prcm_read(uint32_t domain, uint64_t offset, uint64_t data) "domain 0x%02x offset 0x%" PRIx64 " data 0x%" PRIx64
 tt_atlantis_prcm_write(uint32_t domain, uint64_t offset, uint64_t data) "domain 0x%02x offset 0x%" PRIx64 " data 0x%" PRIx64
+
+# imx95_mu.c
+imx95_mu_gcr_write(const char *mu, unsigned side, uint32_t bits, uint64_t vclk_us) "%s side %u GCR set bits 0x%x vclk=%"PRIu64"us"
+imx95_mu_gsr_clear(const char *mu, unsigned side, uint32_t bits, uint32_t left, uint64_t vclk_us) "%s side %u GSR clear bits 0x%x still-pending 0x%x vclk=%"PRIu64"us"
+imx95_mu_irq(const char *mu, unsigned side, int level, uint64_t vclk_us) "%s side %u irq level=%d vclk=%"PRIu64"us"
+
+# imx95_blk_ctrl_s_aonmix.c
+imx95_a55_release_request(unsigned cpu, uint64_t rvbar, uint64_t entry, uint32_t old_wait, uint32_t new_wait) "CPU%u release requested, RVBAR=0x%"PRIx64" entry=0x%"PRIx64" CPUWAIT old=0x%08x new=0x%08x"
+imx95_a55_release_ignored(unsigned cpu) "CPU%u release ignored: RVBAR holds a zero reset vector"
+imx95_a55_entry_differs(uint64_t entry, uint64_t spl_entry) "SM-programmed entry 0x%"PRIx64" differs from container SPL entry 0x%"PRIx64
+imx95_a55_started(unsigned cpu, uint64_t entry) "CPU%u started at entry=0x%"PRIx64
+
+# imx95_src_gen.c
+imx95_src_gen_power(uint64_t slice, uint32_t sw_ctrl, uint32_t func_stat) "slice=0x%04"PRIx64" SLICE_SW_CTRL=0x%08x FUNC_STAT=0x%08x"

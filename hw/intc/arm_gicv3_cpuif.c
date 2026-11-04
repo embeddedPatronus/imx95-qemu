@@ -1100,6 +1100,15 @@ void gicv3_cpuif_update(GICv3CPUState *cs)
     qemu_set_irq(cs->parent_fiq, fiqlevel);
     qemu_set_irq(cs->parent_irq, irqlevel);
     qemu_set_irq(cs->parent_nmi, nmilevel);
+
+    /*
+     * A sleeping PE (GICR_WAKER.ProcessorSleep) with a pending, enabled
+     * interrupt asks the power controller to wake it. This does not depend on
+     * the CPU interface, which the firmware disables before sleeping.
+     */
+    qemu_set_irq(cs->parent_wake,
+                 (cs->gicr_waker & GICR_WAKER_ProcessorSleep) &&
+                 cs->hppi.prio != 0xff);
 }
 
 static uint64_t icc_pmr_read(CPUARMState *env, const ARMCPRegInfo *ri)

@@ -672,6 +672,52 @@ config FSL_IMX8MM_EVK
     depends on TCG
     select FSL_IMX8MM
 
+config FSL_IMX95
+    bool
+    select IMX95_SYSCTR
+    select IMX95_NETC_ECAM
+    select IMX95_PCIE_SERDES_SS
+    select IMX95_CAMERA_NOC
+    select IMX95_CAMERA_CSR
+    select IMX95_HSIO_BLK_CTRL
+    select IMX95_V2X_DBG_MU
+    select IMX95_SC_MU
+    select IMX95_ELE_MU
+    select IMX95_BLK_CTRL_S_AONMIX
+    select IMX95_TPM_PWM
+    select IMX95_WDOG32
+    select IMX95_GPIO
+    select IMX95_ADC
+    select IMX95_SRC_GEN
+    select IMX95_FSPI
+    select IMX95_SMMUV3
+    select IMX95_TMPSNS
+    select IMX95_FRACTPLL
+    select IMX95_BBNSM
+    select IMX95_CCM
+    imply I2C_DEVICES
+    imply PCI_DEVICES
+    select ARM_GIC
+    select ARM_V7M
+    select IMX_LPI2C
+    select IMX_LPUART
+    select PCI_EXPRESS_DESIGNWARE
+    select SDHCI
+    select UNIMP
+    select USB_CHIPIDEA
+    select USB_DWC3
+
+config FSL_IMX95_EVK
+    bool
+    default y
+    depends on AARCH64
+    depends on TCG
+    select FSL_IMX95
+    select PCAL6408A
+    select PCAL6524
+    select PF09_PMIC
+    select PF53_PMIC
+
 config TEGRA241_CMDQV
     bool
     depends on ARM_SMMUV3_ACCEL

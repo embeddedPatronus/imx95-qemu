@@ -75,6 +75,7 @@ system_ss.add(when: 'CONFIG_FSL_IMX8MP_ANALOG', if_true: files('imx8mp_analog.c'
 system_ss.add(when: 'CONFIG_FSL_IMX8MP_CCM', if_true: files('imx8mp_ccm.c'))
 system_ss.add(when: 'CONFIG_IMX_CCM', if_true: files('imx_ccm.c'))
 system_ss.add(when: 'CONFIG_IMX_RNG', if_true: files('imx_rngc.c'))
+system_ss.add(when: 'CONFIG_FSL_IMX95', if_true: files('imx95_mu.c'))
 system_ss.add(when: 'CONFIG_MAX78000_AES', if_true: files('max78000_aes.c'))
 system_ss.add(when: 'CONFIG_MAX78000_GCR', if_true: files('max78000_gcr.c'))
 system_ss.add(when: 'CONFIG_MAX78000_ICC', if_true: files('max78000_icc.c'))
@@ -86,6 +87,8 @@ system_ss.add(when: 'CONFIG_NPCM7XX', if_true: files(
   'npcm7xx_pwm.c',
   'npcm7xx_rng.c',
 ))
+system_ss.add(when: 'CONFIG_PF09_PMIC', if_true: files('pf09_pmic.c'))
+system_ss.add(when: 'CONFIG_PF53_PMIC', if_true: files('pf53_pmic.c'))
 system_ss.add(when: 'CONFIG_OMAP', if_true: files(
   'omap_clk.c',
 ))
@@ -179,6 +182,26 @@ system_ss.add(when: 'CONFIG_SBSA_REF', if_true: files('sbsa_ec.c'))
 system_ss.add(when: 'CONFIG_LASI', if_true: files('lasi.c'))
 
 system_ss.add(when: 'CONFIG_AXIADO_CLK', if_true: files('axiado_clk.c'))
+system_ss.add(when: 'CONFIG_IMX95_CCM', if_true: files('imx95_ccm.c'))
+system_ss.add(when: 'CONFIG_IMX95_BBNSM', if_true: files('imx95_bbnsm.c'))
+system_ss.add(when: 'CONFIG_IMX95_FRACTPLL', if_true: files('imx95_fractpll.c'))
+system_ss.add(when: 'CONFIG_IMX95_TMPSNS', if_true: files('imx95_tmpsns.c'))
+system_ss.add(when: 'CONFIG_IMX95_SMMUV3', if_true: files('imx95_smmuv3.c'))
+system_ss.add(when: 'CONFIG_IMX95_FSPI', if_true: files('imx95_fspi.c'))
+system_ss.add(when: 'CONFIG_IMX95_SRC_GEN', if_true: files('imx95_src_gen.c'))
+system_ss.add(when: 'CONFIG_IMX95_ADC', if_true: files('imx95_adc.c'))
+system_ss.add(when: 'CONFIG_IMX95_GPIO', if_true: files('imx95_gpio.c'))
+system_ss.add(when: 'CONFIG_IMX95_WDOG32', if_true: files('imx95_wdog32.c'))
+system_ss.add(when: 'CONFIG_IMX95_TPM_PWM', if_true: files('imx95_tpm_pwm.c'))
+system_ss.add(when: 'CONFIG_IMX95_BLK_CTRL_S_AONMIX', if_true: files('imx95_blk_ctrl_s_aonmix.c'))
+system_ss.add(when: 'CONFIG_IMX95_ELE_MU', if_true: files('imx95_ele_mu.c'))
+system_ss.add(when: 'CONFIG_IMX95_SC_MU', if_true: files('imx95_sc_mu.c'))
+system_ss.add(when: 'CONFIG_IMX95_V2X_DBG_MU', if_true: files('imx95_v2x_dbg_mu.c'))
+system_ss.add(when: 'CONFIG_IMX95_HSIO_BLK_CTRL', if_true: files('imx95_hsio_blk_ctrl.c'))
+system_ss.add(when: 'CONFIG_IMX95_CAMERA_CSR', if_true: files('imx95_camera_csr.c'))
+system_ss.add(when: 'CONFIG_IMX95_CAMERA_NOC', if_true: files('imx95_camera_noc.c'))
+system_ss.add(when: 'CONFIG_IMX95_PCIE_SERDES_SS', if_true: files('imx95_pcie_serdes_ss.c'))
+system_ss.add(when: 'CONFIG_IMX95_NETC_ECAM', if_true: files('imx95_netc_ecam.c'))
 
 # Qualcomm Hexagon DSP subsystems
 system_ss.add(when: 'CONFIG_QCOM_QDSP6SS_CLK', if_true: files('qcom-qdsp6ss-clk.c'))

@@ -4,6 +4,9 @@ config ESCC
 config HTIF
     bool
 
+config IMX_LPUART
+    bool
+
 config PARALLEL
     bool
     default y

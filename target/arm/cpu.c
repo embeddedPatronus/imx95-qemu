@@ -1285,6 +1285,8 @@ static void arm_cpu_initfn(Object *obj)
                              "gicv3-maintenance-interrupt", 1);
     qdev_init_gpio_out_named(DEVICE(cpu), &cpu->pmu_interrupt,
                              "pmu-interrupt", 1);
+    qdev_init_gpio_out_named(DEVICE(cpu), &cpu->wfi_powerdown,
+                             "wfi-powerdown", 1);
 #endif
 
     /* DTB consumers generally don't in fact care what the 'compatible'
@@ -2193,6 +2195,10 @@ static void arm_cpu_realizefn(DeviceState *dev, Error **errp)
     /* Consistently update MPIDR_EL1 in isar.idregs[] by adding feature bits */
     {
         uint64_t mpidr = cpu->mp_affinity;
+
+        if (cpu->mpidr_mt) {
+            mpidr |= BIT_ULL(24);
+        }
 
         if (arm_feature(env, ARM_FEATURE_V7MP)) {
             mpidr |= (1U << 31);

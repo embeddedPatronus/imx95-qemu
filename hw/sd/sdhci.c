@@ -361,6 +361,20 @@ static void sdhci_send_command(SDHCIState *s)
 
     s->errintsts = 0;
     s->acmd12errsts = 0;
+    if ((s->trnmod & SDHC_TRNS_ACMD23) &&
+        (s->cmdreg & SDHC_CMD_DATA_PRESENT)) {
+        SDRequest sbc_request;
+        uint8_t sbc_response[16];
+        size_t sbc_rlen;
+
+        sbc_request.cmd = 23;
+        sbc_request.arg = s->sdmasysad;
+        trace_sdhci_send_command(sbc_request.cmd, sbc_request.arg);
+        sbc_rlen = sdbus_do_command(&s->sdbus, &sbc_request, sbc_response,
+                         sizeof(sbc_response));
+        (void)sbc_rlen;
+    }
+
     request.cmd = s->cmdreg >> 8;
     request.arg = s->argument;
 
@@ -1776,6 +1790,7 @@ static void sdhci_bus_class_init(ObjectClass *klass, const void *data)
 /* --- qdev i.MX eSDHC --- */
 
 #define ESDHC_MIX_CTRL                  0x48
+#define ESDHC_MIX_CTRL_AC23EN            (1 << 7)
 
 #define ESDHC_VENDOR_SPEC               0xc0
 #define ESDHC_FRC_SDCLK_ON              (1 << 8)
@@ -2029,6 +2044,22 @@ static void fsl_esdhc_le_init(Object *obj)
     qdev_prop_set_uint8(dev, "sd-spec-version", 2);
 }
 
+/*
+ * uSDHC SYS_CTRL (offset 0x2c) software-reset request bits: RSTA, RSTC, RSTD
+ * and RSTT. The host controller clears them again when the reset has
+ * completed, and the driver polls for that.
+ */
+#define USDHC_SYSCTL_RSTA               0x01000000u
+#define USDHC_SYSCTL_RSTC               0x02000000u
+#define USDHC_SYSCTL_RSTD               0x04000000u
+#define USDHC_SYSCTL_RSTT               0x10000000u
+#define USDHC_SYSCTL_RSTMASK            (USDHC_SYSCTL_RSTA | USDHC_SYSCTL_RSTC | \
+                                         USDHC_SYSCTL_RSTD | USDHC_SYSCTL_RSTT)
+/* CLKCON bits that must read as set once a reset has been requested. */
+#define USDHC_CLKCON_READY              0x0007
+/* PRNSTS bit 24, kept set after a reset request. */
+#define USDHC_PRNSTS_AFTER_RESET        0x01000000u
+
 static void
 usdhc_write(void *opaque, hwaddr offset, uint64_t val, unsigned size)
 {
@@ -2043,15 +2074,22 @@ usdhc_write(void *opaque, hwaddr offset, uint64_t val, unsigned size)
          * into a write to ESDHC_MIX_CTRL, so we do the opposite in
          * order to get where we started.
          *
-         * Note that Auto CMD23 Enable bit is located in a wrong place
-         * on i.MX, but since it is not used by QEMU we do not care.
+	 * imx95-fix: the Auto CMD23 Enable bit IS located in a
+         * different bit position on i.MX (ESDHC_MIX_CTRL_AC23EN,
+         * bit 7) than generic SDHCI's TRNMOD (SDHC_TRNS_ACMD23,
+         * bit 3) -- translate it back to the generic bit position
+         * here so that the shared hw/sd/sd.c multi_blk_cnt/Auto-CMD23
+         * logic can actually see it, instead of being silently
+         * dropped as an unrecognized bit in s->trnmod.
          *
-         * We don't want to call sdhci_write(.., SDHC_TRNMOD, ...)
-         * here because it will result in a call to
-         * sdhci_send_command(s) which we don't want.
          *
          */
-        s->trnmod = value & UINT16_MAX;
+	value &= UINT16_MAX;
+        if (value & ESDHC_MIX_CTRL_AC23EN) {
+          value &= ~ESDHC_MIX_CTRL_AC23EN;
+          value |= SDHC_TRNS_ACMD23;
+        }
+        s->trnmod = value;
         break;
 
     case SDHC_TRNMOD:
@@ -2066,14 +2104,41 @@ usdhc_write(void *opaque, hwaddr offset, uint64_t val, unsigned size)
         sdhci_write(opaque, offset, val | s->trnmod, size);
         break;
 
+    case SDHC_CLKCON:
+        /*
+         * Software-reset handshake. The generic model leaves the reset
+         * request bits set, so a driver that polls for them to clear would
+         * wait forever; clear them and report the clock as ready.
+         */
+        esdhc_write(opaque, offset, val, size);
+        s->clkcon &= ~(uint16_t)((val & USDHC_SYSCTL_RSTMASK) >> 16);
+        s->clkcon |= USDHC_CLKCON_READY;
+        s->prnsts |= USDHC_PRNSTS_AFTER_RESET;
+        break;
+
     default:
         esdhc_write(opaque, offset, val, size);
         break;
     }
 }
 
+static uint64_t usdhc_read(void *opaque, hwaddr offset, unsigned size)
+{
+    SDHCIState *s = SYSBUS_SDHCI(opaque);
+    uint64_t val = esdhc_read(opaque, offset, size);
+
+    if (offset == SDHC_NORINTSTS && (val & SDHC_NIS_DMA) && s->blkcnt > 0 &&
+        SDHC_DMA_TYPE(s->hostctl1) == SDHC_CTRL_SDMA) {
+        s->norintsts &= ~SDHC_NIS_DMA;
+        usdhc_write(opaque, SDHC_SYSAD, s->sdmasysad, 4);
+        val = esdhc_read(opaque, offset, size);
+    }
+
+    return val;
+}
+
 static const MemoryRegionOps usdhc_mmio_ops = {
-    .read = esdhc_read,
+    .read = usdhc_read,
     .write = usdhc_write,
     .valid = {
         .min_access_size = 1,

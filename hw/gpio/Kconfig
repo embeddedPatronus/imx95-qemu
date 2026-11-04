@@ -27,6 +27,13 @@ config PCA9554
     bool
     depends on I2C
 
+config PCAL6408A
+    bool
+
+config PCAL6524
+    bool
+    depends on I2C
+
 config PCF8574
     bool
     depends on I2C
