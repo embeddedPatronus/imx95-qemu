@@ -2975,14 +2975,30 @@ static void vmsa_tcr_el12_write(CPUARMState *env, const ARMCPRegInfo *ri,
     raw_write(env, ri, value);
 }
 
+static bool ttbr1_kpti_view_switch(uint64_t oldv, uint64_t newv,
+                                   bool asid_in_ttbr1)
+{
+    uint64_t diff = oldv ^ newv;
+
+    return asid_in_ttbr1 &&
+           extract64(diff, 48, 16) == 1 &&
+           extract64(diff, 1, 47) != 0;
+}
+
 static void vmsa_ttbr_write(CPUARMState *env, const ARMCPRegInfo *ri,
                             uint64_t value)
 {
     /* If the ASID changes (with a 64-bit write), we must flush the TLB.  */
     if (cpreg_field_type(ri) == MO_64 &&
         extract64(raw_read(env, ri) ^ value, 48, 16) != 0) {
-        ARMCPU *cpu = env_archcpu(env);
-        tlb_flush(CPU(cpu));
+        if (!ttbr1_kpti_view_switch(raw_read(env, ri), value,
+                                    ri->state == ARM_CP_STATE_AA64 &&
+                                    ri->opc1 == 0 && ri->crm == 0 &&
+                                    ri->opc2 == 1 &&
+                                    (env->cp15.tcr_el[1] & TTBCR_A1))) {
+            ARMCPU *cpu = env_archcpu(env);
+            tlb_flush(CPU(cpu));
+        }
     }
     raw_write(env, ri, value);
 }
@@ -2998,7 +3014,11 @@ static void vmsa_tcr_ttbr_el2_write(CPUARMState *env, const ARMCPRegInfo *ri,
      */
     if (extract64(raw_read(env, ri) ^ value, 48, 16) &&
         (arm_hcr_el2_eff(env) & HCR_E2H)) {
-        tlb_flush_by_mmuidx(env_cpu(env), alle2_tlbmask());
+        if (!ttbr1_kpti_view_switch(raw_read(env, ri), value,
+                                    ri->opc2 == 1 &&
+                                    (env->cp15.tcr_el[2] & TTBCR_A1))) {
+            tlb_flush_by_mmuidx(env_cpu(env), alle2_tlbmask());
+        }
     }
     raw_write(env, ri, value);
 }

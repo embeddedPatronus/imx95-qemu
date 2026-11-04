@@ -345,6 +345,15 @@ REG32(GFLADJ, 0x530)
     FIELD(GFLADJ, GFLADJ_30MHZ, 0, 6)
 REG32(GUSB2RHBCTL, 0x540)
     FIELD(GUSB2RHBCTL, OVRD_L1TIMEOUT, 0, 4)
+REG32(DCFG, 0x600)
+REG32(DCTL, 0x604)
+    FIELD(DCTL, RUN_STOP, 31, 1)
+    FIELD(DCTL, CSFTRST, 30, 1)
+REG32(DEVTEN, 0x608)
+REG32(DSTS, 0x60c)
+REG32(DGCMDPAR, 0x610)
+REG32(DGCMD, 0x614)
+REG32(DALEPENA, 0x620)
 
 #define DWC3_GLOBAL_OFFSET 0xC100
 static void reset_csr(USBDWC3 * s)
@@ -368,6 +377,8 @@ static void reset_csr(USBDWC3 * s)
         case R_GUID:
             break;
         case R_GUCTL:
+            break;
+        case R_DCFG...R_DSTS:
             break;
         case R_GHWPARAMS0...R_GHWPARAMS7:
             break;
@@ -396,6 +407,13 @@ static void usb_dwc3_guid_postw(RegisterInfo *reg, uint64_t val64)
     USBDWC3 *s = USB_DWC3(reg->opaque);
 
     s->regs[R_GUID] = s->cfg.dwc_usb3_user;
+}
+
+static void usb_dwc3_dctl_postw(RegisterInfo *reg, uint64_t val64)
+{
+    USBDWC3 *s = USB_DWC3(reg->opaque);
+
+    ARRAY_FIELD_DP32(s->regs, DCTL, CSFTRST, 0);
 }
 
 static const RegisterAccessInfo usb_dwc3_regs_info[] = {
@@ -565,6 +583,16 @@ static const RegisterAccessInfo usb_dwc3_regs_info[] = {
     },{ .name = "GUSB2RHBCTL",  .addr = A_GUSB2RHBCTL,
         .rsvd = 0xfffffff0,
         .unimp = 0xffffffff,
+    },{ .name = "DCFG",  .addr = A_DCFG,
+        .reset = 0x00080804,
+    },{ .name = "DCTL",  .addr = A_DCTL,
+        .reset = 0x00f00000, .post_write = usb_dwc3_dctl_postw,
+    },{ .name = "DEVTEN",  .addr = A_DEVTEN,
+    },{ .name = "DSTS",  .addr = A_DSTS,
+        .reset = 0x00520004, .ro = 0xffffffff,
+    },{ .name = "DGCMDPAR",  .addr = A_DGCMDPAR,
+    },{ .name = "DGCMD",  .addr = A_DGCMD,
+    },{ .name = "DALEPENA",  .addr = A_DALEPENA,
     }
 };
 

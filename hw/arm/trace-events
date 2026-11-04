@@ -100,3 +100,18 @@ bcm2838_gic_set_irq(int irq, int level) "gic irq:%d lvl:%d"
 # bcm2838_pcie.c
 bcm2838_pcie_host_read(unsigned int size, uint64_t offset, uint64_t value) "%u bytes @ 0x%04"PRIx64": 0x%016"PRIx64
 bcm2838_pcie_host_write(unsigned int size, uint64_t offset, uint64_t value) "%u bytes @ 0x%04"PRIx64": 0x%016"PRIx64
+
+# imx95-container.c
+imx95_container_set(unsigned version) "container-set version %u"
+imx95_container_header(unsigned index, uint64_t offset, unsigned version, unsigned tag, uint32_t length, unsigned images) "container %u off=0x%"PRIx64" version=%u tag=0x%02x length=0x%x images=%u"
+imx95_container_image(unsigned container, unsigned image, uint64_t offset, uint32_t size, uint64_t load, uint64_t entry, uint32_t flags) "image c%u.i%u off=0x%"PRIx64" size=0x%x load=0x%"PRIx64" entry=0x%"PRIx64" flags=0x%08x"
+imx95_container_secondary_set(uint64_t offset, unsigned version, unsigned tag, uint32_t length, unsigned images) "secondary container set off=0x%"PRIx64" version=%u tag=0x%02x length=0x%x images=%u"
+
+# imx95-bootrom.c
+imx95_bootrom_source(const char *source) "boot source: %s"
+imx95_bootrom_image(const char *what, unsigned container, unsigned image, uint64_t offset, uint32_t size, uint64_t load) "loaded %s image c%u.i%u off=0x%"PRIx64" size=0x%x load=0x%"PRIx64
+imx95_bootrom_no_spl(void) "no Cortex-A55 SPL image found"
+imx95_bootrom_not_container(const char *why) "not a container set (%s), loading as a raw System Manager image"
+imx95_bootrom_raw_sm(const char *file, uint64_t addr, int64_t size) "raw SM image '%s' at 0x%"PRIx64", %"PRId64" bytes"
+imx95_bootrom_no_handover(bool spl, bool secondary) "no ROM handover (spl=%d, secondary set valid=%d)"
+imx95_bootrom_handover(uint64_t entry, uint32_t flags, uint32_t secondary_offset) "ROM handover: a55c0 entry=0x%"PRIx64" flags=0x%08x secondary set at 0x%08x"

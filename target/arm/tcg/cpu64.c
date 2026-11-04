@@ -201,6 +201,49 @@ static void cpu_max_get_l0gptsz(Object *obj, Visitor *v, const char *name,
 static const Property arm_cpu_lpa2_property =
     DEFINE_PROP_BOOL("lpa2", ARMCPU, prop_lpa2, true);
 
+
+enum {
+    A55_CPUACTLR, A55_CPUECTLR, A55_CPUPWRCTLR,
+    A55_CPUPSELR, A55_CPUPCR, A55_CPUPOR, A55_CPUPMR,
+    /* DSU cluster registers */
+    A55_CLUSTERACTLR, A55_CLUSTERECTLR, A55_CLUSTERPWRCTLR, A55_CLUSTERPWRDN,
+};
+
+#define A55_IMPDEF(nm, el, op1, m, op2, acc, idx)                          \
+    { .name = nm, .state = ARM_CP_STATE_AA64,                              \
+      .opc0 = 3, .opc1 = op1, .crn = 15, .crm = m, .opc2 = op2,            \
+      .access = acc, .resetvalue = 0,                                      \
+      .fieldoffset = offsetof(CPUARMState, cp15.impdef_regs[idx]) }
+
+static const ARMCPRegInfo cortex_a55_cp_reginfo[] = {
+    A55_IMPDEF("CPUACTLR_EL1", 1, 0, 1, 0, PL1_RW, A55_CPUACTLR),
+    A55_IMPDEF("CPUECTLR_EL1", 1, 0, 1, 4, PL1_RW, A55_CPUECTLR),
+    A55_IMPDEF("CPUPWRCTLR_EL1", 1, 0, 2, 7, PL1_RW, A55_CPUPWRCTLR),
+    A55_IMPDEF("CPUPSELR_EL3", 3, 6, 8, 0, PL3_RW, A55_CPUPSELR),
+    A55_IMPDEF("CPUPCR_EL3", 3, 6, 8, 1, PL3_RW, A55_CPUPCR),
+    A55_IMPDEF("CPUPOR_EL3", 3, 6, 8, 2, PL3_RW, A55_CPUPOR),
+    A55_IMPDEF("CPUPMR_EL3", 3, 6, 8, 3, PL3_RW, A55_CPUPMR),
+    { .name = "CLUSTERCFR_EL1", .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 0, .crn = 15, .crm = 3, .opc2 = 0,
+      .access = PL1_R, .type = ARM_CP_CONST, .resetvalue = 0 },
+    { .name = "CLUSTERIDR_EL1", .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 0, .crn = 15, .crm = 3, .opc2 = 1,
+      .access = PL1_R, .type = ARM_CP_CONST, .resetvalue = 0 },
+    { .name = "CLUSTERREVIDR_EL1", .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 0, .crn = 15, .crm = 3, .opc2 = 2,
+      .access = PL1_R, .type = ARM_CP_CONST, .resetvalue = 0 },
+    A55_IMPDEF("CLUSTERACTLR_EL1", 1, 0, 3, 3, PL1_RW, A55_CLUSTERACTLR),
+    A55_IMPDEF("CLUSTERECTLR_EL1", 1, 0, 3, 4, PL1_RW, A55_CLUSTERECTLR),
+    { .name = "CLUSTERPWRCTLR_EL1", .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 0, .crn = 15, .crm = 3, .opc2 = 5,
+      .access = PL1_RW, .resetvalue = 0x70,
+      .fieldoffset = offsetof(CPUARMState, cp15.impdef_regs[A55_CLUSTERPWRCTLR]) },
+    A55_IMPDEF("CLUSTERPWRDN_EL1", 1, 0, 3, 6, PL1_RW, A55_CLUSTERPWRDN),
+    { .name = "CLUSTERPWRSTAT_EL1", .state = ARM_CP_STATE_AA64,
+      .opc0 = 3, .opc1 = 0, .crn = 15, .crm = 3, .opc2 = 7,
+      .access = PL1_R, .type = ARM_CP_CONST, .resetvalue = 0 },
+};
+
 static void aarch64_a55_initfn(Object *obj)
 {
     ARMCPU *cpu = ARM_CPU(obj);
@@ -273,6 +316,8 @@ static void aarch64_a55_initfn(Object *obj)
 
     /* From D5.4 AArch64 PMU register summary */
     cpu->isar.reset_pmcr_el0 = 0x410b3000;
+
+    define_arm_cp_regs(cpu, cortex_a55_cp_reginfo);
 }
 
 static void aarch64_a72_initfn(Object *obj)
