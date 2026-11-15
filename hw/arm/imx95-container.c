@@ -219,6 +219,18 @@ bool imx95_container_find_images(const Imx95ContainerMedia *m,
                 continue;
             }
 
+            if (image_is_executable_on(&img, IMX95_IMG_CORE_CM7)) {
+                if (!sel->have_cm7) {
+                    sel->cm7 = img;
+                    sel->have_cm7 = true;
+                }
+                continue;
+            }
+
+            /*
+             * The first executable Cortex-A55 image of the ROM container set
+             * is the SPL; its addresses come from the container.
+             */
             if (image_is_executable_on(&img, IMX95_IMG_CORE_CA55) &&
                 !sel->have_a55_spl) {
                 sel->a55_spl = img;

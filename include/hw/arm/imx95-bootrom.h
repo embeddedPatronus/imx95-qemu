@@ -20,6 +20,10 @@ typedef struct Imx95BootRomInfo {
     uint32_t spl_size;
     unsigned spl_container_index;
     unsigned spl_image_index;
+    bool m7_loaded;
+    hwaddr m7_load_addr;
+    hwaddr m7_entry_addr;
+    uint32_t m7_size;
     bool secondary_set_valid;
     uint32_t secondary_set_offset;
 } Imx95BootRomInfo;

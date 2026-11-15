@@ -44,7 +44,10 @@ static const struct {
     [FSL_IMX95_AON_MU2_B] = { 0x445c0000, 64 * KiB, "imx95.aon-mu2-b" },
     [FSL_IMX95_AON_MU2_SRAM_A] = { 0x445b1000, 1 * KiB, "imx95.aon-mu2-sram" },
     [FSL_IMX95_AON_MU2_SRAM_B] = { 0x445c1000, 1 * KiB, "imx95.aon-mu2-sram-b-alias" },
+    [FSL_IMX95_AON_MU5_A] = { 0x44610000, 64 * KiB, "imx95.aon-mu5-a" },
     [FSL_IMX95_AON_MU5_B] = { 0x44620000, 64 * KiB, "imx95.aon-mu5-b" },
+    [FSL_IMX95_AON_MU5_SRAM_A] = { 0x44611000, 4 * KiB, "imx95.aon-mu5-sram" },
+    [FSL_IMX95_AON_MU5_SRAM_B] = { 0x44621000, 4 * KiB, "imx95.aon-mu5-sram-b-alias" },
     [FSL_IMX95_BBNSM] = { 0x44440000, 64 * KiB, "imx95.bbnsm" },
     [FSL_IMX95_BLK_CTRL_GPUMIX] = { 0x4d810000, 64 * KiB, "imx95.blk-ctrl-gpumix" },
     [FSL_IMX95_BLK_CTRL_S_AONMIX] = { 0x444f0000, 64 * KiB, "imx95.blk-ctrl-s-aonmix" },
@@ -84,6 +87,7 @@ static const struct {
     [FSL_IMX95_LPUART_A55] = { 0x44380000, 64 * KiB, "imx95.lpuart-a55" },
     [FSL_IMX95_LPUART_A55_ALIAS] = { 0x5a060000, 64 * KiB, "imx8-lpuart6-alias" },
     [FSL_IMX95_LPUART_SM] = { 0x44390000, 64 * KiB, "imx95.lpuart-sm" },
+    [FSL_IMX95_LPUART_M7] = { 0x42570000, 64 * KiB, "imx95.lpuart-m7" },
     [FSL_IMX95_M33_CODE_TCM] = { 0x1ffc0000, 256 * KiB, "imx95.m33.code-tcm" },
     [FSL_IMX95_M33_DATA_TCM] = { 0x20000000, 256 * KiB, "imx95.m33.data-tcm" },
     [FSL_IMX95_M33_XCACHE_LPCAC] = { 0x44400000, 64 * KiB, "imx95.m33-xcache-lpcac" },
@@ -140,6 +144,7 @@ static const struct {
     [FSL_IMX95_VFCCU_FHID0] = { 0x446b0000, 64 * KiB, "imx95.vfccu-fhid0" },
     [FSL_IMX95_VFCCU_GLOBAL] = { 0x44570000, 64 * KiB, "imx95.vfccu-global" },
     [FSL_IMX95_WAKEUP_MU] = { 0x42430000, 64 * KiB, "imx95.wakeup-mu" },
+    [FSL_IMX95_WAKEUP_MU_B] = { 0x42440000, 64 * KiB, "imx95.wakeup-mu-b" },
     [FSL_IMX95_WDOG1] = { 0x442d0000, 64 * KiB, "imx95.wdog1" },
     [FSL_IMX95_WDOG2] = { 0x442e0000, 64 * KiB, "imx95.wdog2" },
     [FSL_IMX95_WDOG4] = { 0x42490000, 64 * KiB, "imx95.wdog4" },
@@ -155,12 +160,15 @@ static void fsl_imx95_init(Object *obj)
                             TYPE_CPU_CLUSTER);
     object_initialize_child(obj, "gic", &s->gic, gicv3_class_name());
     object_initialize_child(obj, "m33", &s->m33, TYPE_ARMV7M);
+    object_initialize_child(obj, "m7", &s->m7, TYPE_ARMV7M);
+    object_initialize_child(obj, "m7-lpuart", &s->m7_lpuart, TYPE_IMX_LPUART);
 
     for (i = 0; i < ARRAY_SIZE(s->aon_mu); i++) {
         g_autofree char *name = g_strdup_printf("aon-mu%d", i + 1);
         object_initialize_child(obj, name, &s->aon_mu[i], TYPE_IMX95_MU);
     }
     object_initialize_child(obj, "wakeup-mu", &s->wakeup_mu, TYPE_IMX95_MU);
+    object_initialize_child(obj, "m7-mu", &s->m7_mu, TYPE_IMX95_MU);
 
     for (i = 0; i < FSL_IMX95_NUM_LPUARTS; i++) {
         g_autofree char *name = g_strdup_printf("lpuart%d", i + 1);
@@ -229,6 +237,47 @@ static void fsl_imx95_a55_reset(void *opaque)
     cpu_reset(CPU(opaque));
 }
 
+static void fsl_imx95_m7_start_work(CPUState *cs, run_on_cpu_data data)
+{
+    ARMCPU *cpu = ARM_CPU(cs);
+
+    cpu->init_svtor = data.host_int;
+    cpu->init_nsvtor = data.host_int;
+    cs->start_powered_off = false;
+    cpu_reset(cs);
+    cs->start_powered_off = true;
+    cs->halted = 0;
+}
+
+static void fsl_imx95_m7_stop_work(CPUState *cs, run_on_cpu_data data)
+{
+    cs->halted = 1;
+    cs->exception_index = EXCP_HLT;
+}
+
+static void fsl_imx95_m7_run_in(void *opaque, int n, int level)
+{
+    FslImx95State *s = opaque;
+    CPUState *cs = CPU(s->m7.cpu);
+
+    if (level) {
+        uint32_t vtor = object_property_get_uint(OBJECT(&s->blk_ctrl_aonmix),
+                                                 "m7-initvtor", &error_abort);
+
+        async_run_on_cpu(cs, fsl_imx95_m7_start_work,
+                         RUN_ON_CPU_HOST_INT(vtor));
+    } else {
+        async_run_on_cpu(cs, fsl_imx95_m7_stop_work, RUN_ON_CPU_NULL);
+    }
+}
+
+#define FSL_IMX95_M7_TCM_SYS_ADDR   0x203c0000
+#define FSL_IMX95_M7_TCM_SEC_ADDR   0x303c0000
+#define FSL_IMX95_M7_ITCM_SIZE      (256 * KiB)
+#define FSL_IMX95_M7_DTCM_SIZE      (256 * KiB)
+#define FSL_IMX95_M7_DTCM_BASE      0x20000000
+#define FSL_IMX95_M7_NUM_IRQS       240
+
 static void fsl_imx95_realize(DeviceState *dev, Error **errp)
 {
     FslImx95State *s = FSL_IMX95(dev);
@@ -258,6 +307,30 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
                                 fsl_imx95_memmap[FSL_IMX95_M33_DATA_TCM].addr,
                                 &s->m33_data_tcm);
 
+    if (!memory_region_init_ram(&s->m7_itcm, OBJECT(dev), "imx95.m7.itcm",
+                                FSL_IMX95_M7_ITCM_SIZE, errp) ||
+        !memory_region_init_ram(&s->m7_dtcm, OBJECT(dev), "imx95.m7.dtcm",
+                                FSL_IMX95_M7_DTCM_SIZE, errp)) {
+        return;
+    }
+    memory_region_add_subregion(sysmem, FSL_IMX95_M7_TCM_SYS_ADDR,
+                                &s->m7_itcm);
+    memory_region_add_subregion(sysmem,
+                                FSL_IMX95_M7_TCM_SYS_ADDR + FSL_IMX95_M7_ITCM_SIZE,
+                                &s->m7_dtcm);
+    memory_region_init_alias(&s->m7_itcm_sec_alias, OBJECT(dev),
+                             "imx95.m7.itcm-secure", &s->m7_itcm, 0,
+                             FSL_IMX95_M7_ITCM_SIZE);
+    memory_region_add_subregion(sysmem, FSL_IMX95_M7_TCM_SEC_ADDR,
+                                &s->m7_itcm_sec_alias);
+    memory_region_init_alias(&s->m7_dtcm_sec_alias, OBJECT(dev),
+                             "imx95.m7.dtcm-secure", &s->m7_dtcm, 0,
+                             FSL_IMX95_M7_DTCM_SIZE);
+    memory_region_add_subregion(sysmem,
+                                FSL_IMX95_M7_TCM_SEC_ADDR + FSL_IMX95_M7_ITCM_SIZE,
+                                &s->m7_dtcm_sec_alias);
+
+    /* Holds the A55 SPL image placed there by the boot ROM. */
     if (!memory_region_init_ram(&s->a55_ocram, OBJECT(dev),
                                 fsl_imx95_memmap[FSL_IMX95_A55_OCRAM].name,
                                 fsl_imx95_memmap[FSL_IMX95_A55_OCRAM].size,
@@ -385,6 +458,57 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
     CPU(s->m33.cpu)->cluster_index = 1;
     armv7m_load_kernel(s->m33.cpu, NULL, 0, 0);
 
+    memory_region_init(&s->m7_view, OBJECT(dev), "imx95.m7-view", 4 * GiB);
+    memory_region_init_alias(&s->m7_sys_alias, OBJECT(dev), "imx95.m7-sys",
+                             sysmem, 0, 4 * GiB);
+    memory_region_add_subregion_overlap(&s->m7_view, 0, &s->m7_sys_alias, 0);
+    memory_region_init_alias(&s->m7_itcm_alias, OBJECT(dev), "imx95.m7-itcm",
+                             &s->m7_itcm, 0, FSL_IMX95_M7_ITCM_SIZE);
+    memory_region_add_subregion_overlap(&s->m7_view, 0, &s->m7_itcm_alias, 1);
+    memory_region_init_alias(&s->m7_dtcm_alias, OBJECT(dev), "imx95.m7-dtcm",
+                             &s->m7_dtcm, 0, FSL_IMX95_M7_DTCM_SIZE);
+    memory_region_add_subregion_overlap(&s->m7_view, FSL_IMX95_M7_DTCM_BASE,
+                                        &s->m7_dtcm_alias, 1);
+
+    s->m7_cpuclk = clock_new(OBJECT(dev), "m7-cpuclk");
+    s->m7_refclk = clock_new(OBJECT(dev), "m7-refclk");
+    clock_set_hz(s->m7_cpuclk, 24 * 1000 * 1000);
+    clock_set_hz(s->m7_refclk, 24 * 1000 * 1000);
+    qdev_connect_clock_in(DEVICE(&s->m7), "cpuclk", s->m7_cpuclk);
+    qdev_connect_clock_in(DEVICE(&s->m7), "refclk", s->m7_refclk);
+    object_property_set_link(OBJECT(&s->m7), "memory", OBJECT(&s->m7_view),
+                             &error_abort);
+    qdev_prop_set_string(DEVICE(&s->m7), "cpu-type",
+                         ARM_CPU_TYPE_NAME("cortex-m7"));
+    qdev_prop_set_uint32(DEVICE(&s->m7), "num-irq", FSL_IMX95_M7_NUM_IRQS);
+    qdev_prop_set_bit(DEVICE(&s->m7), "start-powered-off", true);
+    qdev_prop_set_uint32(DEVICE(&s->m7), "mpu-ns-regions", 16);
+    qdev_prop_set_uint32(DEVICE(&s->m7), "mpu-s-regions", 16);
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->m7), errp)) {
+        return;
+    }
+    g_assert(s->m7.cpu != NULL);
+    CPU(s->m7.cpu)->cluster_index = 2;
+    armv7m_load_kernel(s->m7.cpu, NULL, 0, 0);
+    qdev_init_gpio_in_named(dev, fsl_imx95_m7_run_in, "m7-run", 1);
+    qdev_connect_gpio_out_named(DEVICE(&s->blk_ctrl_aonmix), "m7-run", 0,
+                                qdev_get_gpio_in_named(dev, "m7-run", 0));
+
+    {
+        Chardev *chr = serial_hd(2);
+        SysBusDevice *sbd = SYS_BUS_DEVICE(&s->m7_lpuart);
+
+        if (chr) {
+            qdev_prop_set_chr(DEVICE(&s->m7_lpuart), "chardev", chr);
+        }
+        if (!sysbus_realize(sbd, errp)) {
+            return;
+        }
+        sysbus_mmio_map(sbd, 0, fsl_imx95_memmap[FSL_IMX95_LPUART_M7].addr);
+        sysbus_connect_irq(sbd, 0, qdev_get_gpio_in(DEVICE(&s->m7),
+                                                    FSL_IMX95_LPUART_M7_IRQ));
+    }
+
     /* AON message units (A side -> GIC, B side -> M33 NVIC) */
     for (i = 0; i < ARRAY_SIZE(s->aon_mu); i++) {
         static const struct {
@@ -428,11 +552,51 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
         s->aon_mu[i].gier[1] = BIT(0);
     }
 
+    if (!memory_region_init_ram(&s->m7_mu_sram, OBJECT(dev),
+                                fsl_imx95_memmap[FSL_IMX95_AON_MU5_SRAM_A].name,
+                                fsl_imx95_memmap[FSL_IMX95_AON_MU5_SRAM_A].size,
+                                errp)) {
+        return;
+    }
+    memory_region_add_subregion(sysmem,
+                                fsl_imx95_memmap[FSL_IMX95_AON_MU5_SRAM_A].addr,
+                                &s->m7_mu_sram);
+    memory_region_init_alias(&s->m7_mu_sram_b_alias, OBJECT(dev),
+                             fsl_imx95_memmap[FSL_IMX95_AON_MU5_SRAM_B].name,
+                             &s->m7_mu_sram, 0,
+                             fsl_imx95_memmap[FSL_IMX95_AON_MU5_SRAM_B].size);
+    memory_region_add_subregion(sysmem,
+                                fsl_imx95_memmap[FSL_IMX95_AON_MU5_SRAM_B].addr,
+                                &s->m7_mu_sram_b_alias);
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->m7_mu), errp)) {
+        return;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->m7_mu), 0,
+                    fsl_imx95_memmap[FSL_IMX95_AON_MU5_A].addr);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->m7_mu), 1,
+                    fsl_imx95_memmap[FSL_IMX95_AON_MU5_B].addr);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->m7_mu), 0,
+                       qdev_get_gpio_in(DEVICE(&s->m7),
+                                        FSL_IMX95_AON_MU5_MUA_M7_IRQ));
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->m7_mu), 1,
+                       qdev_get_gpio_in(m33dev,
+                                        FSL_IMX95_AON_MU5_MUB_M33_IRQ));
+    s->m7_mu.gier[0] = BIT(0);
+    s->m7_mu.gier[1] = BIT(0);
+
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->wakeup_mu), errp)) {
         return;
     }
+
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->wakeup_mu), 0,
                     fsl_imx95_memmap[FSL_IMX95_WAKEUP_MU].addr);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->wakeup_mu), 1,
+                    fsl_imx95_memmap[FSL_IMX95_WAKEUP_MU_B].addr);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->wakeup_mu), 0,
+                       qdev_get_gpio_in(gicdev, FSL_IMX95_WAKEUP_MU7_MUA_IRQ));
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->wakeup_mu), 1,
+                       qdev_get_gpio_in(DEVICE(&s->m7),
+                                        FSL_IMX95_WAKEUP_MU7_MUB_M7_IRQ));
 
     for (i = 0; i < FSL_IMX95_NUM_LPUARTS; i++) {
         static const struct {
@@ -712,6 +876,11 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
         case FSL_IMX95_AON_MU2_B:
         case FSL_IMX95_AON_MU2_SRAM_A:
         case FSL_IMX95_AON_MU2_SRAM_B:
+        case FSL_IMX95_AON_MU5_A:
+        case FSL_IMX95_AON_MU5_B:
+        case FSL_IMX95_AON_MU5_SRAM_A:
+        case FSL_IMX95_AON_MU5_SRAM_B:
+        case FSL_IMX95_LPUART_M7:
         case FSL_IMX95_BBNSM:
         case FSL_IMX95_BLK_CTRL_S_AONMIX:
         case FSL_IMX95_CAMERA_CSR:
@@ -750,6 +919,7 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
         case FSL_IMX95_USDHC1 ... FSL_IMX95_USDHC3:
         case FSL_IMX95_V2X_DBG_MU:
         case FSL_IMX95_WAKEUP_MU:
+        case FSL_IMX95_WAKEUP_MU_B:
         case FSL_IMX95_WDOG1:
         case FSL_IMX95_WDOG2:
         case FSL_IMX95_WDOG4:

@@ -277,6 +277,23 @@ static void imx95_blk_ctrl_s_aonmix_write(void *opaque,
     old_value = s->regs[offset / 4];
     s->regs[offset / 4] = (uint32_t)value;
 
+    if (offset == BLK_CTRL_INITVTOR) {
+        /* fetch vector table from Bits 31:7 of the address */
+        s->m7_initvtor = (uint32_t)value & 0xffffff80U;
+        s->regs[offset / 4] = s->m7_initvtor;
+        return;
+    }
+    if (offset == BLK_CTRL_M7_CFG) {
+        bool run = !((uint32_t)value & BLK_CTRL_M7_CFG_WAIT);
+
+        s->regs[offset / 4] = (uint32_t)value & BLK_CTRL_M7_CFG_RW_MASK;
+        /* The core starts when CPUWAIT is cleared, setting it holds the core */
+        if (run != s->m7_run_level) {
+            s->m7_run_level = run;
+            qemu_set_irq(s->m7_run, run);
+        }
+        return;
+    }
     if (offset == IMX95_ELE_MU3_CA55_MASK_REG) {
         qemu_set_irq(s->ele_mu3_irq_mask,
                      ((uint32_t)value & IMX95_ELE_MU3_CA55_MASK_BIT) != 0U);
@@ -310,6 +327,9 @@ static void imx95_blk_ctrl_s_aonmix_reset(DeviceState *dev)
     memset(s->regs, 0, sizeof(s->regs));
 
     s->regs[BLK_CTRL_CA55_CPUWAIT / 4] = 0x3f;
+    s->regs[BLK_CTRL_M7_CFG / 4] = BLK_CTRL_M7_CFG_WAIT;
+    s->m7_initvtor = 0;
+    s->m7_run_level = false;
 
     for (unsigned int offset = 0x40; offset <= 0x6c; offset += 4) {
         s->regs[offset / sizeof(uint32_t)] = UINT32_MAX;
@@ -341,6 +361,9 @@ static void imx95_blk_ctrl_s_aonmix_init(Object *obj)
                           TYPE_IMX95_BLK_CTRL_S_AONMIX, IMX95_BLK_CTRL_S_AONMIX_SIZE);
     sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->iomem);
     qdev_init_gpio_out_named(DEVICE(obj), &s->ele_mu3_irq_mask, "ele-mu3-irq-mask", 1);
+    qdev_init_gpio_out_named(DEVICE(obj), &s->m7_run, "m7-run", 1);
+    object_property_add_uint32_ptr(obj, "m7-initvtor", &s->m7_initvtor,
+                                   OBJ_PROP_FLAG_READ);
     qdev_init_gpio_in_named(DEVICE(obj), imx95_blk_ctrl_a55_pwrdn_in,
                             "a55-wfi-powerdown", IMX95_BLK_CTRL_NUM_A55);
     qdev_init_gpio_in_named(DEVICE(obj), imx95_blk_ctrl_a55_gic_wake_in,

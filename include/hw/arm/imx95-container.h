@@ -27,6 +27,7 @@
 #define IMX95_IMG_TYPE_DUMMY         0xe
 #define IMX95_IMG_CORE_CM33          0x10
 #define IMX95_IMG_CORE_CA55          0x20
+#define IMX95_IMG_CORE_CM7           0xb0
 
 #define IMX95_SM_IMAGE_BASE          0x1ffc0000
 
@@ -53,11 +54,13 @@ typedef struct Imx95ContainerImage {
 typedef struct Imx95ContainerSelection {
     bool have_cm33;
     bool have_a55_spl;
+    bool have_cm7;
     bool have_secondary_set;
     unsigned set_version;
     uint64_t secondary_set_offset;
     Imx95ContainerImage cm33;
     Imx95ContainerImage a55_spl;
+    Imx95ContainerImage cm7;
 } Imx95ContainerSelection;
 
 bool imx95_container_find_images(const Imx95ContainerMedia *m,

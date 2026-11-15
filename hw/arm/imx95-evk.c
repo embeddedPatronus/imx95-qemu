@@ -124,8 +124,8 @@ static void imx95_evk_machine_class_init(ObjectClass *oc, const void *data)
 
     mc->desc = "NXP i.MX95 19x19 EVK Board";
     mc->init = imx95_evk_init;
-    mc->max_cpus = FSL_IMX95_NUM_CPUS + 1;
-    mc->default_cpus = FSL_IMX95_NUM_CPUS + 1;
+    mc->max_cpus = FSL_IMX95_NUM_CPUS + 2;
+    mc->default_cpus = FSL_IMX95_NUM_CPUS + 2;
     mc->default_ram_id = "imx95-evk.ram";
     mc->default_ram_size = FSL_IMX95_RAM_SIZE_MAX;
 }

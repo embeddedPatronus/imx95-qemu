@@ -69,10 +69,17 @@ struct FslImx95State {
     ARMv7MState     m33;
     Clock          *m33_cpuclk;
     Clock          *m33_refclk;
+    ARMv7MState     m7;
+    Clock          *m7_cpuclk;
+    Clock          *m7_refclk;
 
     IMX95MUState    aon_mu[2];
     IMX95MUState    wakeup_mu;
+    IMX95MUState    m7_mu;
+    MemoryRegion    m7_mu_sram;
+    MemoryRegion    m7_mu_sram_b_alias;
     IMXLPUARTState  lpuart[FSL_IMX95_NUM_LPUARTS];
+    IMXLPUARTState  m7_lpuart;
     IMXLPI2CState   lpi2c[FSL_IMX95_NUM_LPI2CS];
     SDHCIState      usdhc[FSL_IMX95_NUM_USDHCS];
     USBDWC3         usb1;
@@ -86,6 +93,14 @@ struct FslImx95State {
     MemoryRegion    aon_mu_sram[2];
     MemoryRegion    aon_mu_sram_b_alias[2];
     MemoryRegion    lpuart_a55_alias;
+    MemoryRegion    m7_itcm;
+    MemoryRegion    m7_dtcm;
+    MemoryRegion    m7_itcm_sec_alias;
+    MemoryRegion    m7_dtcm_sec_alias;
+    MemoryRegion    m7_view;
+    MemoryRegion    m7_sys_alias;
+    MemoryRegion    m7_itcm_alias;
+    MemoryRegion    m7_dtcm_alias;
 
     Imx95CcmState ccm;
     Imx95SysctrState sysctr;
@@ -125,6 +140,7 @@ struct FslImx95State {
 
 enum FslImx95Irqs {
     FSL_IMX95_LPUART_SM_IRQ         = 19,
+    FSL_IMX95_LPUART_M7_IRQ         = 64,
     FSL_IMX95_SYSCTR_IRQ            = 72, 
     FSL_IMX95_LPUART_A55_IRQ        = 19,
     FSL_IMX95_LPI2C1_IRQ            = 13,
@@ -145,6 +161,10 @@ enum FslImx95Irqs {
     FSL_IMX95_AON_MU1_MUB_M33_IRQ   = 225,  /* NVIC */
     FSL_IMX95_AON_MU2_MUA_IRQ       = 226,
     FSL_IMX95_AON_MU2_MUB_M33_IRQ   = 227,  /* NVIC */
+    FSL_IMX95_AON_MU5_MUA_M7_IRQ    = 205,
+    FSL_IMX95_AON_MU5_MUB_M33_IRQ   = 232,
+    FSL_IMX95_WAKEUP_MU7_MUA_IRQ    = 234,
+    FSL_IMX95_WAKEUP_MU7_MUB_M7_IRQ = 207,
 };
 
 enum FslImx95MemoryRegions {
@@ -159,7 +179,10 @@ enum FslImx95MemoryRegions {
     FSL_IMX95_AON_MU2_B,
     FSL_IMX95_AON_MU2_SRAM_A,
     FSL_IMX95_AON_MU2_SRAM_B,
+    FSL_IMX95_AON_MU5_A,
     FSL_IMX95_AON_MU5_B,
+    FSL_IMX95_AON_MU5_SRAM_A,
+    FSL_IMX95_AON_MU5_SRAM_B,
     FSL_IMX95_BBNSM,
     FSL_IMX95_BLK_CTRL_GPUMIX,
     FSL_IMX95_BLK_CTRL_S_AONMIX,
@@ -199,6 +222,7 @@ enum FslImx95MemoryRegions {
     FSL_IMX95_LPUART_A55,
     FSL_IMX95_LPUART_A55_ALIAS,
     FSL_IMX95_LPUART_SM,
+    FSL_IMX95_LPUART_M7,
     FSL_IMX95_M33_CODE_TCM,
     FSL_IMX95_M33_DATA_TCM,
     FSL_IMX95_M33_XCACHE_LPCAC,
@@ -255,6 +279,7 @@ enum FslImx95MemoryRegions {
     FSL_IMX95_VFCCU_FHID0,
     FSL_IMX95_VFCCU_GLOBAL,
     FSL_IMX95_WAKEUP_MU,
+    FSL_IMX95_WAKEUP_MU_B,
     FSL_IMX95_WDOG1,
     FSL_IMX95_WDOG2,
     FSL_IMX95_WDOG4,

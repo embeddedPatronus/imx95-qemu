@@ -16,6 +16,10 @@
 #define IMX95_ELE_MU3_CA55_MASK_BIT   BIT(24)
 #define IMX95_BLK_CTRL_S_AONMIX_SIZE 0x10000
 
+#define BLK_CTRL_INITVTOR            0x108   /* M7 start address */
+#define BLK_CTRL_M7_CFG              0x124
+#define BLK_CTRL_M7_CFG_WAIT         BIT(4)
+#define BLK_CTRL_M7_CFG_RW_MASK      0x00000077U
 #define BLK_CTRL_CA55_CPUWAIT        0x160
 #define BLK_CTRL_CA55_RVBARADDR0_L   0x164
 #define BLK_CTRL_CA55_RVBARADDR0_H   0x168
@@ -49,6 +53,9 @@ struct Imx95BlkCtrlSAonmixState {
     uint32_t regs[IMX95_BLK_CTRL_S_AONMIX_SIZE / 4];
 
     qemu_irq ele_mu3_irq_mask;
+    qemu_irq m7_run;
+    bool m7_run_level;
+    uint32_t m7_initvtor;
 
     bool a55_spl_loaded;
     uint64_t a55_spl_entry;

@@ -55,6 +55,7 @@
 #define IMX95_ROM_BOOT_DEV_INSTANCE_0    0U
 #define IMX95_ROM_BOOT_DEV_TYPE_MMC      2U
 #define IMX95_ROM_IMG_TYPE_EXEC      0U
+#define IMX95_ROM_CPU_M7P            1U
 #define IMX95_ROM_CPU_A55C0          2U
 #define IMX95_ROM_MSEL_DEFAULT       0U
 
@@ -228,6 +229,17 @@ static bool rom_load_from_sd(Imx95BootRomInfo *info, BlockBackend *blk,
         return false;
     }
     rom_note_spl(info, &sel.a55_spl);
+
+    if (sel.have_cm7) {
+        if (!rom_load_payload(blk, &sel.cm7, "imx95.m7.sd", "m7", false,
+                              errp)) {
+            return false;
+        }
+        info->m7_loaded = true;
+        info->m7_load_addr = sel.cm7.load_addr;
+        info->m7_entry_addr = sel.cm7.entry_addr;
+        info->m7_size = sel.cm7.size;
+    }
     return true;
 }
 
@@ -304,7 +316,7 @@ void imx95_bootrom_add_handover(const Imx95BootRomInfo *info)
     stl_le_p(handover + 0x00, IMX95_ROM_HANDOVER_BARKER);
     stw_le_p(handover + 0x04, IMX95_ROM_HANDOVER_VER);
     stw_le_p(handover + 0x06, IMX95_ROM_HANDOVER_SIZE);
-    handover[0x08] = 1;
+    handover[0x08] = info->m7_loaded ? 2 : 1;
     stl_le_p(handover + 0x0c, 0);
 
     img_flags = rom_handover_flags(IMX95_ROM_CPU_A55C0, IMX95_ROM_IMG_TYPE_EXEC,
@@ -312,6 +324,14 @@ void imx95_bootrom_add_handover(const Imx95BootRomInfo *info)
     stq_le_p(handover + 0x10, info->spl_entry_addr);
     stw_le_p(handover + 0x18, 0);
     stl_le_p(handover + 0x1c, img_flags);
+
+    if (info->m7_loaded) {
+        stq_le_p(handover + 0x20, info->m7_entry_addr);
+        stw_le_p(handover + 0x28, 0);
+        stl_le_p(handover + 0x2c,
+                 rom_handover_flags(IMX95_ROM_CPU_M7P, IMX95_ROM_IMG_TYPE_EXEC,
+                                    IMX95_ROM_MSEL_DEFAULT, 0));
+    }
 
     stl_le_p(passover + 0x00, 0x0280504f);
     stl_le_p(passover + IMX95_ROM_PASSOVER_BOOT_MODE_OFF,
