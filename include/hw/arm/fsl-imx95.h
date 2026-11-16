@@ -15,6 +15,7 @@
 #include "hw/char/imx_lpuart.h"
 #include "hw/i2c/imx_lpi2c.h"
 #include "hw/intc/arm_gicv3_common.h"
+#include "hw/intc/arm_gicv3_its_common.h"
 #include "hw/misc/imx95_mu.h"
 #include "hw/misc/imx95_v2x_dbg_mu.h"
 #include "hw/misc/imx95_sc_mu.h"
@@ -37,7 +38,7 @@
 #include "hw/misc/imx95_netc_ecam.h"
 #include "hw/misc/imx95_pcie_serdes_ss.h"
 #include "hw/misc/imx95_hsio_blk_ctrl.h"
-#include "hw/pci-host/designware.h"
+#include "hw/pci-host/imx95_pcie_host.h"
 #include "hw/sd/sdhci.h"
 #include "hw/usb/chipidea.h"
 #include "hw/usb/hcd-dwc3.h"
@@ -66,6 +67,7 @@ struct FslImx95State {
     CPUClusterState a55_cluster;
     ARMCPU          cpu[FSL_IMX95_NUM_CPUS];
     GICv3State      gic;
+    GICv3ITSState   its;
     ARMv7MState     m33;
     Clock          *m33_cpuclk;
     Clock          *m33_refclk;
@@ -84,7 +86,7 @@ struct FslImx95State {
     SDHCIState      usdhc[FSL_IMX95_NUM_USDHCS];
     USBDWC3         usb1;
     ChipideaState   usb2;
-    DesignwarePCIEHost pcie1;
+    Imx95PcieHost pcie[2];        /* PCIe0 and PCIe1 */
 
     MemoryRegion    m33_code_tcm;
     MemoryRegion    m33_data_tcm;
@@ -165,6 +167,11 @@ enum FslImx95Irqs {
     FSL_IMX95_AON_MU5_MUB_M33_IRQ   = 232,
     FSL_IMX95_WAKEUP_MU7_MUA_IRQ    = 234,
     FSL_IMX95_WAKEUP_MU7_MUB_M7_IRQ = 207,
+    FSL_IMX95_PCIE0_INTA_IRQ        = 306,
+    FSL_IMX95_PCIE0_MSI_IRQ         = 310,
+    FSL_IMX95_PCIE1_INTA_IRQ        = 312,
+    FSL_IMX95_PCIE1_MSI_IRQ         = 316,
+    FSL_IMX95_PCIE1_DMA_IRQ         = 317,
 };
 
 enum FslImx95MemoryRegions {
@@ -196,12 +203,14 @@ enum FslImx95MemoryRegions {
     FSL_IMX95_EDMA2,
     FSL_IMX95_EDMA3,
     FSL_IMX95_ELE_MU,
+    FSL_IMX95_FSB,
     FSL_IMX95_ERM,
     FSL_IMX95_FRACTPLL,
     FSL_IMX95_FRO_TUNER,
     FSL_IMX95_FSPI1_MMAP,
     FSL_IMX95_FSPI1_REG,
     FSL_IMX95_GIC_DIST,
+    FSL_IMX95_GIC_ITS,
     FSL_IMX95_GIC_REDIST,
     FSL_IMX95_GPC_CPU_CTRL,
     FSL_IMX95_GPC_GLOBAL,
@@ -239,9 +248,12 @@ enum FslImx95MemoryRegions {
     FSL_IMX95_NOC_CAMERA_BLK_CTRL,
     FSL_IMX95_NOC_SRAMCTL,
     FSL_IMX95_OSC24M,
+    FSL_IMX95_PCIE0,
     FSL_IMX95_PCIE0_APP,
+    FSL_IMX95_PCIE0_ATU,
     FSL_IMX95_PCIE1,
     FSL_IMX95_PCIE1_APP,
+    FSL_IMX95_PCIE1_ATU,
     FSL_IMX95_PERIPH_CATCHALL,
     FSL_IMX95_RAM,
     FSL_IMX95_SAR_ADC,

@@ -23,6 +23,10 @@ struct Imx95PcieSerdesSsState {
     SysBusDevice parent_obj;
 
     MemoryRegion iomem;
+    qemu_irq ltssm_en;
+    MemoryRegion msi_doorbell;
+    uint32_t devid_prefix;
+    uint64_t msi_target;
     uint32_t regs[IMX95_PCIE_SERDES_SS_NUM_REGS];
     uint32_t lut[IMX95_PCIE_SERDES_SS_LUT_ENTRIES][2];
 };

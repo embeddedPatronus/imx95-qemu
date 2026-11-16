@@ -65,6 +65,11 @@ config PCI_EXPRESS_XILINX
     bool
     select PCI_EXPRESS
 
+config IMX95_PCIE_HOST
+    bool
+    select PCI_EXPRESS
+    select MSI_NONBROKEN
+
 config PCI_EXPRESS_DESIGNWARE
     bool
     select PCI_EXPRESS

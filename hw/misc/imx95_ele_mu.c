@@ -176,6 +176,25 @@ static void imx95_ele_mu_queue_response(Imx95EleMuState *s)
     }
     break;
 
+    case ELE_READ_FUSE_REQ: {
+        uint32_t fuse_id = s->tx_words[1];
+
+        s->rx_words[0] =
+            ((uint32_t)ELE_MSG_TAG_RESP << 24) |
+            ((uint32_t)cmd << 16) |
+            (ELE_READ_FUSE_RESP_WORDS << 8) |
+            ver;
+        if (fuse_id < IMX95_ELE_NUM_FUSES) {
+            s->rx_words[1] = ELE_SUCCESS_IND;
+            s->rx_words[2] = s->fuse[fuse_id];
+        } else {
+            s->rx_words[1] = ELE_FAILURE_IND;
+            s->rx_words[2] = 0U;
+        }
+        s->rx_count = ELE_READ_FUSE_RESP_WORDS;
+        break;
+    }
+
      case ELE_TRNG_STATE_REQ:
         s->rx_words[0] =
             ((uint32_t)ELE_MSG_TAG_RESP << 24) |
@@ -454,6 +473,34 @@ static void imx95_ele_mu_write(void *opaque, hwaddr offset,
     }
 }
 
+static uint64_t imx95_fsb_read(void *opaque, hwaddr offset, unsigned size)
+{
+    Imx95EleMuState *s = opaque;
+
+    if (offset >= IMX95_FSB_FUSE_OFFSET &&
+        offset < IMX95_FSB_FUSE_OFFSET + IMX95_ELE_NUM_FUSES * 4) {
+        uint32_t word = s->fuse[(offset - IMX95_FSB_FUSE_OFFSET) / 4];
+
+        return word >> ((offset & 3) * 8);
+    }
+    return 0;
+}
+
+static void imx95_fsb_write(void *opaque, hwaddr offset, uint64_t value,
+                            unsigned size)
+{
+    qemu_log_mask(LOG_UNIMP,
+                  "imx95.fsb: write of 0x%" PRIx64 " to offset 0x%" HWADDR_PRIx
+                  " ignored, fuses are not programmable\n", value, offset);
+}
+
+static const MemoryRegionOps imx95_fsb_ops = {
+    .read = imx95_fsb_read,
+    .write = imx95_fsb_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = { .min_access_size = 1, .max_access_size = 4 },
+};
+
 static const MemoryRegionOps imx95_ele_mu_ops = {
     .read = imx95_ele_mu_read,
     .write = imx95_ele_mu_write,
@@ -489,6 +536,9 @@ static void imx95_ele_mu_reset(DeviceState *dev)
     s->rx_count = 0;
     s->rx_pos = 0;
     s->active_block = UINT_MAX;
+    memset(s->fuse, 0, sizeof(s->fuse));
+    s->fuse[IMX95_ELE_FUSE_WORD_NPU_A55] = s->fuse_npu_a55;
+    s->fuse[IMX95_ELE_FUSE_WORD_FEATURES] = s->fuse_features;
     s->ca55_masked = false;
     s->mu3_irq_level = false;
     qemu_set_irq(s->mu3_irq, 0);
@@ -501,6 +551,9 @@ static void imx95_ele_mu_init(Object *obj)
     memory_region_init_io(&s->iomem, obj, &imx95_ele_mu_ops, s,
                           TYPE_IMX95_ELE_MU, IMX95_ELE_MU_SIZE);
     sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->iomem);
+    memory_region_init_io(&s->fsb, obj, &imx95_fsb_ops, s, "imx95.fsb",
+                          IMX95_FSB_SIZE);
+    sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->fsb);
     sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->mu3_irq);
     qdev_init_gpio_in_named(DEVICE(obj), imx95_ele_mu_set_ca55_mask,
                             "ca55-irq-mask", 1);
@@ -508,7 +561,7 @@ static void imx95_ele_mu_init(Object *obj)
 
 static const VMStateDescription vmstate_imx95_ele_mu = {
     .name = TYPE_IMX95_ELE_MU,
-    .version_id = 1,
+    .version_id = 2,
     .minimum_version_id = 1,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT32_ARRAY(regs, Imx95EleMuState, IMX95_ELE_MU_SIZE / 4),
@@ -521,13 +574,21 @@ static const VMStateDescription vmstate_imx95_ele_mu = {
         VMSTATE_UINT32(active_block, Imx95EleMuState),
         VMSTATE_BOOL(ca55_masked, Imx95EleMuState),
         VMSTATE_BOOL(mu3_irq_level, Imx95EleMuState),
+        VMSTATE_UINT32_ARRAY_V(fuse, Imx95EleMuState, IMX95_ELE_NUM_FUSES, 2),
         VMSTATE_END_OF_LIST()
     }
+};
+
+static const Property imx95_ele_mu_props[] = {
+    DEFINE_PROP_UINT32("fuse-npu-a55", Imx95EleMuState, fuse_npu_a55, 0),
+    DEFINE_PROP_UINT32("fuse-features", Imx95EleMuState, fuse_features, 0),
 };
 
 static void imx95_ele_mu_class_init(ObjectClass *oc, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
+
+    device_class_set_props(dc, imx95_ele_mu_props);
 
     device_class_set_legacy_reset(dc, imx95_ele_mu_reset);
     dc->vmsd = &vmstate_imx95_ele_mu;

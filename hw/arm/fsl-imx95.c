@@ -25,6 +25,7 @@
 #include "hw/core/qdev-clock.h"
 #include "hw/core/qdev-properties.h"
 #include "hw/intc/arm_gic_common.h"
+#include "hw/intc/arm_gicv3_its_common.h"
 #include "hw/misc/unimp.h"
 #include "target/arm/gtimer.h"
 
@@ -61,12 +62,14 @@ static const struct {
     [FSL_IMX95_EDMA2] = { 0x42000000, 2112 * KiB, "imx95.edma2" },
     [FSL_IMX95_EDMA3] = { 0x42210000, 2112 * KiB, "imx95.edma3" },
     [FSL_IMX95_ELE_MU] = { 0x47500000, 512 * KiB, "imx95.ele-mu" },
+    [FSL_IMX95_FSB] = { 0x47510000, 64 * KiB, "imx95.fsb" },
     [FSL_IMX95_ERM] = { 0x44560000, 64 * KiB, "imx95.erm" },
     [FSL_IMX95_FRACTPLL] = { 0x44481000, 4 * KiB, "imx95.fractpll" },
     [FSL_IMX95_FRO_TUNER] = { 0x44485000, 64 * KiB, "imx95.fro-tuner" },
     [FSL_IMX95_FSPI1_MMAP] = { 0x28000000, 128 * MiB, "imx95.fspi1-mmap" },
     [FSL_IMX95_FSPI1_REG] = { 0x425e0000, 64 * KiB, "imx95.fspi1-reg" },
     [FSL_IMX95_GIC_DIST] = { 0x48000000, 64 * KiB, "gic_dist" },
+    [FSL_IMX95_GIC_ITS] = { 0x48040000, 128 * KiB, "gic_its" },
     [FSL_IMX95_GIC_REDIST] = { 0x48060000, 768 * KiB, "gic_redist" },
     [FSL_IMX95_GPC_CPU_CTRL] = { 0x44470000, 18 * KiB, "imx95.gpc-cpu-ctrl" },
     [FSL_IMX95_GPC_GLOBAL] = { 0x44474800, 4 * KiB, "imx95.gpc-global" },
@@ -104,9 +107,12 @@ static const struct {
     [FSL_IMX95_NOC_CAMERA_BLK_CTRL] = { 0x49062000, 64 * KiB, "imx95.noc-camera-blk-ctrl" },
     [FSL_IMX95_NOC_SRAMCTL] = { 0x490a0000, 64 * KiB, "imx95.noc-sramctl" },
     [FSL_IMX95_OSC24M] = { 0x44480000, 4 * KiB, "imx95.osc24m" },
+    [FSL_IMX95_PCIE0] = { 0x4c300000, 64 * KiB, "imx95.pcie0" },
     [FSL_IMX95_PCIE0_APP] = { 0x4c340000, 16 * KiB, "imx95.pcie0-app" },
+    [FSL_IMX95_PCIE0_ATU] = { 0x4c360000, 64 * KiB, "imx95.pcie0-atu" },
     [FSL_IMX95_PCIE1] = { 0x4c380000, 64 * KiB, "imx95.pcie1" },
     [FSL_IMX95_PCIE1_APP] = { 0x4c3c0000, 16 * KiB, "imx95.pcie1-app" },
+    [FSL_IMX95_PCIE1_ATU] = { 0x4c3e0000, 64 * KiB, "imx95.pcie1-atu" },
     [FSL_IMX95_PERIPH_CATCHALL] = { 0x40000000, 256 * MiB, "imx95.periph-catchall" },
     [FSL_IMX95_RAM] = { 0x80000000, 16 * GiB, "ram" },
     [FSL_IMX95_SAR_ADC] = { 0x443c0000, 64 * KiB, "imx95.sar-adc" },
@@ -228,8 +234,11 @@ static void fsl_imx95_init(Object *obj)
     object_initialize_child(obj, "v2x-dbg-mu", &s->v2x_dbg_mu,
                             TYPE_IMX95_V2X_DBG_MU);
     object_initialize_child(obj, "sc-mu", &s->sc_mu, TYPE_IMX95_SC_MU);
-    object_initialize_child(obj, "pcie1", &s->pcie1,
-                            TYPE_DESIGNWARE_PCIE_HOST);
+    for (i = 0; i < ARRAY_SIZE(s->pcie); i++) {
+        g_autofree char *nm = g_strdup_printf("pcie%d", i);
+
+        object_initialize_child(obj, nm, &s->pcie[i], TYPE_IMX95_PCIE_HOST);
+    }
 }
 
 static void fsl_imx95_a55_reset(void *opaque)
@@ -394,6 +403,8 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
         qdev_prop_set_uint32(gicdev, "num-irq",
                              FSL_IMX95_NUM_IRQS + GIC_INTERNAL);
         qdev_prop_set_bit(gicdev, "has-security-extensions", true);
+        /* The ITS delivers MSIs as LPIs (GIC-700, RM 119.2.6) */
+        qdev_prop_set_bit(gicdev, "has-lpi", true);
         redist_region_count = qlist_new();
         qlist_append_int(redist_region_count, FSL_IMX95_NUM_CPUS);
         qdev_prop_set_array(gicdev, "redist-region-count",
@@ -407,6 +418,20 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
         sysbus_mmio_map(gicsbd, 1,
                         fsl_imx95_memmap[FSL_IMX95_GIC_REDIST].addr);
 
+        object_initialize_child(OBJECT(s), "gic-its", &s->its,
+                                its_class_name());
+        object_property_set_link(OBJECT(&s->its), "parent-gicv3",
+                                 OBJECT(&s->gic), &error_abort);
+        if (!sysbus_realize(SYS_BUS_DEVICE(&s->its), errp)) {
+            return;
+        }
+        sysbus_mmio_map(SYS_BUS_DEVICE(&s->its), 0,
+                        fsl_imx95_memmap[FSL_IMX95_GIC_ITS].addr);
+
+        /*
+         * Wire each CPU's generic timer outputs and the GIC maintenance
+         * interrupt to the GIC PPI inputs, and the GIC outputs to the CPU.
+         */
         for (i = 0; i < FSL_IMX95_NUM_CPUS; i++) {
             DeviceState *cpudev = DEVICE(&s->cpu[i]);
             int intidbase = FSL_IMX95_NUM_IRQS + i * GIC_INTERNAL;
@@ -690,11 +715,41 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->usb2), 0,
                     fsl_imx95_memmap[FSL_IMX95_USB2].addr);
 
-    if (!sysbus_realize(SYS_BUS_DEVICE(&s->pcie1), errp)) {
-        return;
+    {
+        static const struct {
+            int dbi, atu;
+            unsigned inta, msi;
+        } pcie_table[2] = {
+            { FSL_IMX95_PCIE0, FSL_IMX95_PCIE0_ATU,
+              FSL_IMX95_PCIE0_INTA_IRQ, FSL_IMX95_PCIE0_MSI_IRQ },
+            { FSL_IMX95_PCIE1, FSL_IMX95_PCIE1_ATU,
+              FSL_IMX95_PCIE1_INTA_IRQ, FSL_IMX95_PCIE1_MSI_IRQ },
+        };
+        unsigned n;
+
+        for (n = 0; n < ARRAY_SIZE(s->pcie); n++) {
+            SysBusDevice *sbd = SYS_BUS_DEVICE(&s->pcie[n]);
+            g_autofree char *bus = g_strdup_printf("imx95-pcie%u", n);
+
+            qdev_prop_set_string(DEVICE(sbd), "bus-name", bus);
+            qdev_prop_set_uint32(DEVICE(sbd), "domain-nr", n);
+            if (!sysbus_realize(sbd, errp)) {
+                return;
+            }
+            sysbus_mmio_map(sbd, 0, fsl_imx95_memmap[pcie_table[n].dbi].addr);
+            sysbus_mmio_map(sbd, 1, fsl_imx95_memmap[pcie_table[n].atu].addr);
+            for (i = 0; i < 4; i++) {
+                sysbus_connect_irq(sbd, i,
+                    qdev_get_gpio_in(gicdev, pcie_table[n].inta + i));
+            }
+            /* LTSSM_EN of the SerDes_SS starts training of this controller */
+            qdev_connect_gpio_out_named(
+                DEVICE(&s->pcie_serdes[n]), "ltssm-en", 0,
+                qdev_get_gpio_in_named(DEVICE(sbd), "ltssm-en", 0));
+            sysbus_connect_irq(sbd, 4,
+                qdev_get_gpio_in(gicdev, pcie_table[n].msi));
+        }
     }
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->pcie1), 0,
-                    fsl_imx95_memmap[FSL_IMX95_PCIE1].addr);
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->tpm[0]), errp)) {
         return;
@@ -807,6 +862,11 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
         static const int serdes_id[2] = { FSL_IMX95_PCIE0_APP, FSL_IMX95_PCIE1_APP };
         static const int ecam_id[2] = { FSL_IMX95_NETC_ECAM0, FSL_IMX95_NETC_ECAM1 };
 
+        qdev_prop_set_uint32(DEVICE(&s->pcie_serdes[i]), "devid-prefix",
+                             i == 0 ? 0x00 : 0x80);
+        qdev_prop_set_uint64(DEVICE(&s->pcie_serdes[i]), "msi-target",
+                             fsl_imx95_memmap[FSL_IMX95_GIC_ITS].addr +
+                             ITS_CONTROL_SIZE + GITS_TRANSLATER);
         if (!sysbus_realize(SYS_BUS_DEVICE(&s->pcie_serdes[i]), errp)) {
             return;
         }
@@ -817,6 +877,14 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
         }
         sysbus_mmio_map(SYS_BUS_DEVICE(&s->netc_ecam[i]), 0,
                         fsl_imx95_memmap[ecam_id[i]].addr);
+    }
+
+    for (i = 0; i < ARRAY_SIZE(s->pcie); i++) {
+        memory_region_add_subregion_overlap(
+            &s->pcie[i].address_space_root,
+            fsl_imx95_memmap[FSL_IMX95_GIC_ITS].addr + ITS_CONTROL_SIZE +
+            GITS_TRANSLATER,
+            sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->pcie_serdes[i]), 1), 10);
     }
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->hsio_blk_ctrl), errp)) {
@@ -847,6 +915,8 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->ele_mu), 0,
                     fsl_imx95_memmap[FSL_IMX95_ELE_MU].addr);
+    sysbus_mmio_map_overlap(SYS_BUS_DEVICE(&s->ele_mu), 1,
+                            fsl_imx95_memmap[FSL_IMX95_FSB].addr, 1);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->ele_mu), 0,
                        qdev_get_gpio_in(gicdev, FSL_IMX95_ELE_MU3_IRQ));
     qdev_connect_gpio_out_named(DEVICE(&s->blk_ctrl_aonmix), "ele-mu3-irq-mask",
@@ -889,9 +959,11 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
         case FSL_IMX95_HSIO_BLK_CTRL:
         case FSL_IMX95_DDRMIX:
         case FSL_IMX95_ELE_MU:
+        case FSL_IMX95_FSB:
         case FSL_IMX95_FRACTPLL:
         case FSL_IMX95_FSPI1_REG:
         case FSL_IMX95_GIC_DIST:
+        case FSL_IMX95_GIC_ITS:
         case FSL_IMX95_GIC_REDIST:
         case FSL_IMX95_GPIO1 ... FSL_IMX95_GPIO5:
         case FSL_IMX95_LPI2C1 ... FSL_IMX95_LPI2C8:
@@ -905,9 +977,12 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
         case FSL_IMX95_M33_DATA_TCM:
         case FSL_IMX95_NETC_ECAM0:
         case FSL_IMX95_NETC_ECAM1:
+        case FSL_IMX95_PCIE0:
         case FSL_IMX95_PCIE0_APP:
+        case FSL_IMX95_PCIE0_ATU:
         case FSL_IMX95_PCIE1:
         case FSL_IMX95_PCIE1_APP:
+        case FSL_IMX95_PCIE1_ATU:
         case FSL_IMX95_RAM:
         case FSL_IMX95_SC_MU:
         case FSL_IMX95_SMMUV3:

@@ -192,12 +192,12 @@ The current implementation includes functional models or firmware-facing registe
 
 1. Six Cortex-A55 CPUs
 2. One Cortex-M33 System Manager CPU
-3. GICv3 Distributor, Redistributors, and CPU interfaces
+3. GICv3 Distributor, Redistributors, CPU interfaces, LPIs, and the ITS
 4. Messaging Units
 5. SCMI shared memory
 6. EdgeLock Enclave Messaging Unit
 7. Three uSDHC controllers
-8. LPUART controllers
+8. LPUART controllers (System Manager, Cortex-A55 and Cortex-M7 consoles)
 9. LPI2C controllers
 10. GPIO controllers
 11. PCAL6408A and PCAL6524 GPIO expanders
@@ -213,12 +213,14 @@ The current implementation includes functional models or firmware-facing registe
 21. Temperature sensors
 22. ADC
 23. FlexSPI register interface
-24. PCIe register interfaces
+24. Two PCIe root complexes with SerDes registers, iATU, and MSI delivery through the ITS
 25. SMMUv3 global-register interface
 26. USB integration
 27. NETC ECAM support
 28. Camera CSR and NoC register interfaces
 29. V2X debug Messaging Unit
+30. Cortex-M7 core with TCM, started from the boot container by the System Manager
+31. ELE fuse words with documented feature-disable bits
 
 Some devices are complete functional models. Other devices model only the registers and state transitions required by the currently supported firmware and Linux boot path.
 
@@ -310,6 +312,9 @@ The following distinctions are important:
 10. The model is not suitable for security certification.
 11. GPU, NPU, multimedia, and high-speed I/O performance are not modeled.
 12. KVM operation has not been validated.
+    Fuse words are not programmed: the ELE returns zero for the feature-disable fuses, and the machine does not
+    decide which blocks exist (see docs/system/arm/imx95.rst for how to set them).
+    PCIe: the requester-ID table drops an MSI that matches no entry; the Reference Manual does not define that case.
 13. TCG is the primary execution environment.
 
 =============
@@ -401,6 +406,10 @@ The serial ports are assigned as follows:
 Serial option 	                        Console
 First serial port, -serial pty	        Cortex-M33 System Manager debug console
 Second serial port, -serial stdio	Cortex-A55 firmware and Linux console
+Third serial port, -serial pty	        Cortex-M7 console (optional, only when the boot medium has a Cortex-M7 image)
+
+To use the Cortex-M7 console, add a third serial option, for example "-serial pty -serial stdio -serial pty",
+and open the pseudo-terminal that QEMU reports for the third port (label serial2).
 
 When QEMU starts, it prints the pseudo-terminal allocated to the System Manager console. Example:
 

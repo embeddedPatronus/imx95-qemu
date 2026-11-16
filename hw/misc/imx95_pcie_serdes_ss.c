@@ -12,15 +12,25 @@
 #include "migration/vmstate.h"
 #include "system/memory.h"
 #include "hw/misc/imx95_pcie_serdes_ss.h"
+#include "hw/core/qdev-properties.h"
+#include "hw/core/irq.h"
+#include "system/address-spaces.h"
 
 #define PCIE_PHY_MPLLA_CTRL     0x0010
 #define   MPLL_STATE            BIT(30)
+#define PE0_GEN_CTRL_3          0x1058
+#define   GEN_CTRL_3_LTSSM_EN   BIT(0)
 #define PE0_LUT_ACSCTRL         0x1008
 #define   LUT_ACS_RWA           BIT(16)
 #define   LUT_ACS_ENLOC         0x1f
 #define PE0_LUT_DATA1           0x100c
 #define   LUT_DATA1_MASK        0x80000d3fu  /* VLD [31], DAC_ID [10:8], STREAM_ID [5:0] */
 #define PE0_LUT_DATA2           0x1010
+#define   LUT_DATA1_VLD         BIT(31)
+#define   LUT_DATA1_SID         0x3f
+#define PE0_LUT_INT_STS         0x1014
+#define   LUT_INT_WMS           BIT(31)     /* write */
+#define   LUT_INT_RMS           BIT(30)     /* read */
 
 typedef struct {
     uint16_t offset;
@@ -183,6 +193,14 @@ static void imx95_pcie_serdes_write(void *opaque, hwaddr offset,
     case PE0_LUT_DATA1:
         v &= LUT_DATA1_MASK;
         break;
+    case PE0_GEN_CTRL_3:
+        /* LTSSM_EN starts the link training */
+        qemu_set_irq(s->ltssm_en, v & GEN_CTRL_3_LTSSM_EN);
+        break;
+    case PE0_LUT_INT_STS:
+        /* LUTWMS and LUTRMS are write-one-to-clear, the rest is reserved */
+        v = s->regs[PE0_LUT_INT_STS / 4] & ~(v & (LUT_INT_WMS | LUT_INT_RMS));
+        break;
     case PE0_LUT_ACSCTRL: {
         unsigned entry = v & LUT_ACS_ENLOC;
 
@@ -203,6 +221,63 @@ static void imx95_pcie_serdes_write(void *opaque, hwaddr offset,
     s->regs[offset / 4] = v;
 }
 
+static bool imx95_pcie_serdes_lut_lookup(Imx95PcieSerdesSsState *s,
+                                         uint16_t rid, uint8_t *sid)
+{
+    for (int i = IMX95_PCIE_SERDES_SS_LUT_ENTRIES - 1; i >= 0; i--) {
+        uint32_t d1 = s->lut[i][0];
+        uint32_t d2 = s->lut[i][1];
+        uint16_t reqid = d2 >> 16;
+        uint16_t mask = d2 & 0xffff;
+
+        if ((d1 & LUT_DATA1_VLD) && !((rid ^ reqid) & mask)) {
+            *sid = d1 & LUT_DATA1_SID;
+            return true;
+        }
+    }
+    return false;
+}
+
+static MemTxResult imx95_pcie_msi_doorbell_write(void *opaque, hwaddr addr,
+                                                 uint64_t data, unsigned size,
+                                                 MemTxAttrs attrs)
+{
+    Imx95PcieSerdesSsState *s = opaque;
+    MemTxAttrs fwd = attrs;
+    uint8_t sid;
+
+    if (!imx95_pcie_serdes_lut_lookup(s, attrs.requester_id, &sid)) {
+        s->regs[PE0_LUT_INT_STS / 4] |= LUT_INT_WMS;
+        qemu_log_mask(LOG_GUEST_ERROR,
+                      "imx95.pcie-serdes-ss: MSI from requester 0x%04x matches no LUT entry\n",
+                      attrs.requester_id);
+        return MEMTX_OK;
+    }
+
+    fwd.requester_id = (s->devid_prefix | sid) & 0xffff;
+    if (size == 2) {
+        return address_space_stw_le(&address_space_memory, s->msi_target, data,
+                                    fwd, NULL), MEMTX_OK;
+    }
+    address_space_stl_le(&address_space_memory, s->msi_target, data, fwd, NULL);
+    return MEMTX_OK;
+}
+
+static MemTxResult imx95_pcie_msi_doorbell_read(void *opaque, hwaddr addr,
+                                                uint64_t *data, unsigned size,
+                                                MemTxAttrs attrs)
+{
+    *data = 0;
+    return MEMTX_OK;
+}
+
+static const MemoryRegionOps imx95_pcie_msi_doorbell_ops = {
+    .read_with_attrs = imx95_pcie_msi_doorbell_read,
+    .write_with_attrs = imx95_pcie_msi_doorbell_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = { .min_access_size = 2, .max_access_size = 4 },
+};
+
 static const MemoryRegionOps imx95_pcie_serdes_ops = {
     .read = imx95_pcie_serdes_read,
     .write = imx95_pcie_serdes_write,
@@ -216,6 +291,7 @@ static void imx95_pcie_serdes_reset(DeviceState *dev)
 
     memset(s->regs, 0, sizeof(s->regs));
     memset(s->lut, 0, sizeof(s->lut));
+    qemu_set_irq(s->ltssm_en, 0);
     for (size_t i = 0; i < ARRAY_SIZE(imx95_pcie_serdes_regs); i++) {
         s->regs[imx95_pcie_serdes_regs[i].offset / 4] =
             imx95_pcie_serdes_regs[i].reset;
@@ -230,6 +306,12 @@ static void imx95_pcie_serdes_init(Object *obj)
                           TYPE_IMX95_PCIE_SERDES_SS,
                           IMX95_PCIE_SERDES_SS_SIZE);
     sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->iomem);
+    qdev_init_gpio_out_named(DEVICE(obj), &s->ltssm_en, "ltssm-en", 1);
+
+    memory_region_init_io(&s->msi_doorbell, obj,
+                          &imx95_pcie_msi_doorbell_ops, s,
+                          TYPE_IMX95_PCIE_SERDES_SS "-msi", 4);
+    sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->msi_doorbell);
 }
 
 static const VMStateDescription vmstate_imx95_pcie_serdes = {
@@ -245,9 +327,16 @@ static const VMStateDescription vmstate_imx95_pcie_serdes = {
     }
 };
 
+static const Property imx95_pcie_serdes_props[] = {
+    DEFINE_PROP_UINT32("devid-prefix", Imx95PcieSerdesSsState, devid_prefix, 0),
+    DEFINE_PROP_UINT64("msi-target", Imx95PcieSerdesSsState, msi_target, 0),
+};
+
 static void imx95_pcie_serdes_class_init(ObjectClass *oc, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
+
+    device_class_set_props(dc, imx95_pcie_serdes_props);
 
     device_class_set_legacy_reset(dc, imx95_pcie_serdes_reset);
     dc->vmsd = &vmstate_imx95_pcie_serdes;
