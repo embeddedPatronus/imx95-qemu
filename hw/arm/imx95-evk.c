@@ -30,7 +30,6 @@ struct FslImx95EvkState {
     MachineState parent_obj;
 
     FslImx95State soc;
-    MemoryRegion uboot_alias;
 };
 
 #define IMX95_EVK_PCAL6408A_ADDR    0x20
@@ -42,9 +41,6 @@ struct FslImx95EvkState {
 #define IMX95_EVK_I2C5_TCA6408_ADDR 0x21
 #define IMX95_EVK_I2C7_PCAL6524_ADDR 0x22
 
-#define IMX95_EVK_UBOOT_LINK_ADDR   0x80020000
-#define IMX95_EVK_UBOOT_LOAD_ADDR   0x90200000
-#define IMX95_EVK_UBOOT_SIZE        0x200000
 
 static I2CBus *imx95_evk_i2c_bus(FslImx95EvkState *s, int index)
 {
@@ -74,21 +70,9 @@ static void imx95_evk_init(MachineState *machine)
                        machine->kernel_filename, &error_fatal);
     imx95_bootrom_add_handover(&bootrom);
 
-    qdev_prop_set_bit(DEVICE(&s->soc.blk_ctrl_aonmix), "a55-spl-loaded",
-                      bootrom.spl_loaded);
-    qdev_prop_set_uint64(DEVICE(&s->soc.blk_ctrl_aonmix), "a55-spl-entry",
-                         bootrom.spl_entry_addr);
-
     sysbus_realize_and_unref(SYS_BUS_DEVICE(&s->soc), &error_fatal);
 
     memory_region_add_subregion(sysmem, FSL_IMX95_RAM_START, machine->ram);
-
-    memory_region_init_alias(&s->uboot_alias, OBJECT(machine),
-                             "imx95.uboot-alias", machine->ram,
-                             IMX95_EVK_UBOOT_LOAD_ADDR - FSL_IMX95_RAM_START,
-                             IMX95_EVK_UBOOT_SIZE);
-    memory_region_add_subregion(sysmem, IMX95_EVK_UBOOT_LINK_ADDR,
-                                &s->uboot_alias);
 
     if (di) {
         BlockBackend *blk = blk_by_legacy_dinfo(di);

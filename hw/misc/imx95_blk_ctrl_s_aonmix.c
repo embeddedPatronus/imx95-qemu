@@ -246,18 +246,6 @@ static void imx95_blk_ctrl_s_aonmix_check_a55_release(
             continue;
         }
 
-        if (cpu_index == 0) {
-            if (!s->a55_spl_loaded) {
-                error_report("imx95-a55: CPU0 release requested but "
-                             "A55 SPL is not loaded");
-                continue;
-            }
-            if (reset_vector != s->a55_spl_entry) {
-                trace_imx95_a55_entry_differs(reset_vector,
-                                              (uint64_t)s->a55_spl_entry);
-            }
-        }
-
         imx95_blk_ctrl_a55_start(s, cpu_index, reset_vector);
     }
 }
@@ -388,13 +376,6 @@ static const VMStateDescription vmstate_imx95_blk_ctrl_s_aonmix = {
     }
 };
 
-static const Property imx95_blk_ctrl_s_aonmix_properties[] = {
-    DEFINE_PROP_BOOL("a55-spl-loaded", Imx95BlkCtrlSAonmixState,
-                     a55_spl_loaded, false),
-    DEFINE_PROP_UINT64("a55-spl-entry", Imx95BlkCtrlSAonmixState,
-                       a55_spl_entry, 0),
-};
-
 static void imx95_blk_ctrl_s_aonmix_class_init(ObjectClass *oc, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
@@ -402,7 +383,6 @@ static void imx95_blk_ctrl_s_aonmix_class_init(ObjectClass *oc, const void *data
     device_class_set_legacy_reset(dc, imx95_blk_ctrl_s_aonmix_reset);
     dc->vmsd = &vmstate_imx95_blk_ctrl_s_aonmix;
     dc->desc = "i.MX95 blk ctrl s aonmix";
-    device_class_set_props(dc, imx95_blk_ctrl_s_aonmix_properties);
 }
 
 static const TypeInfo imx95_blk_ctrl_s_aonmix_types[] = {

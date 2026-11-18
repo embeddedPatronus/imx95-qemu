@@ -57,9 +57,6 @@ struct Imx95BlkCtrlSAonmixState {
     bool m7_run_level;
     uint32_t m7_initvtor;
 
-    bool a55_spl_loaded;
-    uint64_t a55_spl_entry;
-
     bool a55_released;
     bool a55_secondary_released[IMX95_BLK_CTRL_NUM_A55];
 

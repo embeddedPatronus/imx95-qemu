@@ -483,7 +483,6 @@ imx95_mu_irq(const char *mu, unsigned side, int level, uint64_t vclk_us) "%s sid
 # imx95_blk_ctrl_s_aonmix.c
 imx95_a55_release_request(unsigned cpu, uint64_t rvbar, uint64_t entry, uint32_t old_wait, uint32_t new_wait) "CPU%u release requested, RVBAR=0x%"PRIx64" entry=0x%"PRIx64" CPUWAIT old=0x%08x new=0x%08x"
 imx95_a55_release_ignored(unsigned cpu) "CPU%u release ignored: RVBAR holds a zero reset vector"
-imx95_a55_entry_differs(uint64_t entry, uint64_t spl_entry) "SM-programmed entry 0x%"PRIx64" differs from container SPL entry 0x%"PRIx64
 imx95_a55_started(unsigned cpu, uint64_t entry) "CPU%u started at entry=0x%"PRIx64
 
 # imx95_src_gen.c
