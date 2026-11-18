@@ -44,10 +44,8 @@ struct FslImx95EvkState {
 
 static I2CBus *imx95_evk_i2c_bus(FslImx95EvkState *s, int index)
 {
-    BusState *bus = qdev_get_child_bus(DEVICE(&s->soc.lpi2c[index]), "i2c");
-
-    g_assert(bus != NULL);
-    return I2C_BUS(bus);
+    g_assert(s->soc.lpi2c[index].bus != NULL);
+    return s->soc.lpi2c[index].bus;
 }
 
 static void imx95_evk_init(MachineState *machine)

@@ -344,14 +344,21 @@ static void imx_lpi2c_init(Object *obj)
                           TYPE_IMX_LPI2C, IMX_LPI2C_MMIO_SIZE);
     sysbus_init_mmio(sbd, &s->iomem);
     sysbus_init_irq(sbd, &s->irq);
+}
 
-    s->bus = i2c_init_bus(DEVICE(obj), "i2c");
+static void imx_lpi2c_realize(DeviceState *dev, Error **errp)
+{
+    IMXLPI2CState *s = IMX_LPI2C(dev);
+    g_autofree char *name = NULL;
+    name = g_strdup(object_get_canonical_path_component(OBJECT(dev)));
+    s->bus = i2c_init_bus(dev, name);
 }
 
 static void imx_lpi2c_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
 
+    dc->realize = imx_lpi2c_realize;
     device_class_set_legacy_reset(dc, imx_lpi2c_reset);
     dc->vmsd = &vmstate_imx_lpi2c;
     dc->desc = "NXP i.MX LPI2C controller";
