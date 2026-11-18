@@ -704,16 +704,21 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
                            qdev_get_gpio_in(gicdev, usdhc_table[i].irq));
     }
 
+    qdev_prop_set_uint32(DEVICE(&s->usb1.sysbus_xhci), "slots", 8);
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->usb1), errp)) {
         return;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->usb1), 0,
                     fsl_imx95_memmap[FSL_IMX95_USB1].addr);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->usb1.sysbus_xhci), 0,
+                       qdev_get_gpio_in(gicdev, FSL_IMX95_USB1_IRQ));
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->usb2), errp)) {
         return;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->usb2), 0,
                     fsl_imx95_memmap[FSL_IMX95_USB2].addr);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->usb2), 0,
+                       qdev_get_gpio_in(gicdev, FSL_IMX95_USB2_IRQ));
 
     {
         static const struct {

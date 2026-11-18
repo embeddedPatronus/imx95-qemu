@@ -2733,6 +2733,7 @@ static void xhci_reset(DeviceState *dev)
         xhci->intr[i].erstsz = 0;
         xhci->intr[i].erstba_low = 0;
         xhci->intr[i].erstba_high = 0;
+        xhci->intr[i].erstba_first = 0;
         xhci->intr[i].erdp_low = 0;
         xhci->intr[i].erdp_high = 0;
 
@@ -3131,10 +3132,21 @@ static void xhci_runtime_write(void *ptr, hwaddr reg,
         } else {
             intr->erstba_low = val & 0xffffffc0;
         }
+        if (intr->erstba_first == 2) {
+            intr->erstba_first = 0;
+            xhci_er_reset(xhci, v);
+        } else {
+            intr->erstba_first = 1;
+        }
         break;
     case 0x14: /* ERSTBA high */
         intr->erstba_high = val;
-        xhci_er_reset(xhci, v);
+        if (intr->erstba_first == 1) {
+            intr->erstba_first = 0;
+            xhci_er_reset(xhci, v);
+        } else {
+            intr->erstba_first = 2;
+        }
         break;
     case 0x18: /* ERDP low */
         if (val & ERDP_EHB) {

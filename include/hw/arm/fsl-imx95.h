@@ -156,6 +156,8 @@ enum FslImx95Irqs {
     FSL_IMX95_USDHC1_IRQ            = 86,
     FSL_IMX95_USDHC2_IRQ            = 87,
     FSL_IMX95_USDHC3_IRQ            = 191,
+    FSL_IMX95_USB1_IRQ              = 175,
+    FSL_IMX95_USB2_IRQ              = 176,
     FSL_IMX95_ADC_IRQ = 199,
     FSL_IMX95_ELE_MU3_IRQ           = 24,
     FSL_IMX95_V2X_DBG_MU_IRQ        = 255,
