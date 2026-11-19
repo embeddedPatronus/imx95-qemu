@@ -23,6 +23,10 @@ typedef struct IMXLPI2CState {
 
     MemoryRegion iomem;
     qemu_irq irq;
+    qemu_irq tx_dma_req; 
+    qemu_irq rx_dma_req;
+    bool tx_req;
+    bool rx_req;
     I2CBus *bus;
 
     uint32_t regs[IMX_LPI2C_MMIO_SIZE / 4];
@@ -30,6 +34,8 @@ typedef struct IMXLPI2CState {
     uint8_t rx_fifo[16];
     unsigned rx_len;
     unsigned rx_pos;
+    uint32_t rx_pending;
+    bool stop_pending;
 } IMXLPI2CState;
 
 #endif /* HW_I2C_IMX_LPI2C_H */

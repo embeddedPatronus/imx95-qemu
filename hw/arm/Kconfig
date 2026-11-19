@@ -699,6 +699,7 @@ config FSL_IMX95
     imply PCI_DEVICES
     select ARM_GIC
     select ARM_V7M
+    select IMX_EDMA
     select IMX_LPI2C
     select IMX_LPUART
     select IMX95_PCIE_HOST

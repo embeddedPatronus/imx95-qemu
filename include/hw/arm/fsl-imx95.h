@@ -13,6 +13,7 @@
 #include "hw/arm/armv7m.h"
 #include "hw/cpu/cluster.h"
 #include "hw/char/imx_lpuart.h"
+#include "hw/dma/imx_edma.h"
 #include "hw/i2c/imx_lpi2c.h"
 #include "hw/intc/arm_gicv3_common.h"
 #include "hw/intc/arm_gicv3_its_common.h"
@@ -57,6 +58,7 @@ enum FslImx95Configuration {
     FSL_IMX95_NUM_LPI2CS       = 8,
     FSL_IMX95_NUM_LPUARTS      = 2,    /* SM debug, Cortex-A55 console */
     FSL_IMX95_NUM_USDHCS       = 3,
+    FSL_IMX95_NUM_EDMAS        = 3,    /* AON eDMA3, WAKEUP eDMA5_2 and eDMA5_3 */
     FSL_IMX95_NUM_IRQS         = 384,
     FSL_IMX95_M33_NUM_IRQS     = 376,
 };
@@ -82,6 +84,7 @@ struct FslImx95State {
     MemoryRegion    m7_mu_sram_b_alias;
     IMXLPUARTState  lpuart[FSL_IMX95_NUM_LPUARTS];
     IMXLPUARTState  m7_lpuart;
+    IMXEDMAState    edma[FSL_IMX95_NUM_EDMAS];
     IMXLPI2CState   lpi2c[FSL_IMX95_NUM_LPI2CS];
     SDHCIState      usdhc[FSL_IMX95_NUM_USDHCS];
     USBDWC3         usb1;
@@ -174,6 +177,37 @@ enum FslImx95Irqs {
     FSL_IMX95_PCIE1_INTA_IRQ        = 312,
     FSL_IMX95_PCIE1_MSI_IRQ         = 316,
     FSL_IMX95_PCIE1_DMA_IRQ         = 317,
+    FSL_IMX95_EDMA_AON_IRQ          = 96,
+    FSL_IMX95_EDMA_AON_ERR_IRQ      = 95,
+    FSL_IMX95_EDMA_WAKEUP2_IRQ      = 128,
+    FSL_IMX95_EDMA_WAKEUP2_ERR_IRQ  = 127,
+    FSL_IMX95_EDMA_WAKEUP3_IRQ      = 256,
+    FSL_IMX95_EDMA_WAKEUP3_ERR_IRQ  = 250,
+};
+
+enum FslImx95Edmas {
+    FSL_IMX95_EDMA_AON,       
+    FSL_IMX95_EDMA_WAKEUP2,  
+    FSL_IMX95_EDMA_WAKEUP3,
+};
+
+enum FslImx95DmaRequests {
+    FSL_IMX95_DMAREQ_LPI2C1_TX = 12, 
+    FSL_IMX95_DMAREQ_LPI2C1_RX = 13,
+    FSL_IMX95_DMAREQ_LPI2C2_TX = 14,
+    FSL_IMX95_DMAREQ_LPI2C2_RX = 15,
+    FSL_IMX95_DMAREQ_LPI2C3_TX = 8,
+    FSL_IMX95_DMAREQ_LPI2C3_RX = 9,
+    FSL_IMX95_DMAREQ_LPI2C4_TX = 10,
+    FSL_IMX95_DMAREQ_LPI2C4_RX = 11,
+    FSL_IMX95_DMAREQ_LPI2C5_TX = 71,
+    FSL_IMX95_DMAREQ_LPI2C5_RX = 72,
+    FSL_IMX95_DMAREQ_LPI2C6_TX = 73,
+    FSL_IMX95_DMAREQ_LPI2C6_RX = 74,
+    FSL_IMX95_DMAREQ_LPI2C7_TX = 75,
+    FSL_IMX95_DMAREQ_LPI2C7_RX = 76,
+    FSL_IMX95_DMAREQ_LPI2C8_TX = 77,
+    FSL_IMX95_DMAREQ_LPI2C8_RX = 78,
 };
 
 enum FslImx95MemoryRegions {

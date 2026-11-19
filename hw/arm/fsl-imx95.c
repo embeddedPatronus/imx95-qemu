@@ -58,7 +58,7 @@ static const struct {
     [FSL_IMX95_CCM] = { 0x44450000, 64 * KiB, "imx95.ccm" },
     [FSL_IMX95_DDRMIX] = { 0x5d000000, 32 * MiB, "imx95.ddrmix" },
     [FSL_IMX95_DISPLAYMIX_IRQSTEER] = { 0x4b0b0000, 4 * KiB, "imx95.displaymix-irqsteer" },
-    [FSL_IMX95_EDMA1] = { 0x44000000, 2 * MiB, "imx95.edma1" },
+    [FSL_IMX95_EDMA1] = { 0x44000000, 2112 * KiB, "imx95.edma1" },
     [FSL_IMX95_EDMA2] = { 0x42000000, 2112 * KiB, "imx95.edma2" },
     [FSL_IMX95_EDMA3] = { 0x42210000, 2112 * KiB, "imx95.edma3" },
     [FSL_IMX95_ELE_MU] = { 0x47500000, 512 * KiB, "imx95.ele-mu" },
@@ -179,6 +179,11 @@ static void fsl_imx95_init(Object *obj)
     for (i = 0; i < FSL_IMX95_NUM_LPUARTS; i++) {
         g_autofree char *name = g_strdup_printf("lpuart%d", i + 1);
         object_initialize_child(obj, name, &s->lpuart[i], TYPE_IMX_LPUART);
+    }
+
+    for (i = 0; i < ARRAY_SIZE(s->edma); i++) {
+        g_autofree char *name = g_strdup_printf("edma%d", i + 1);
+        object_initialize_child(obj, name, &s->edma[i], TYPE_IMX_EDMA);
     }
 
     for (i = 0; i < FSL_IMX95_NUM_LPI2CS; i++) {
@@ -660,19 +665,75 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
             &s->lpuart_a55_alias);
     }
 
+    for (i = 0; i < ARRAY_SIZE(s->edma); i++) {
+        static const struct {
+            int region;
+            unsigned version;
+            unsigned channels;
+            unsigned requests;
+            unsigned irq_lines; 
+            unsigned irq_base;
+            unsigned err_irq;
+        } edma_table[FSL_IMX95_NUM_EDMAS] = {
+            [FSL_IMX95_EDMA_AON] = {
+                FSL_IMX95_EDMA1, IMX_EDMA_V3, 32, 32, 31,
+                FSL_IMX95_EDMA_AON_IRQ, FSL_IMX95_EDMA_AON_ERR_IRQ },
+            [FSL_IMX95_EDMA_WAKEUP2] = {
+                FSL_IMX95_EDMA2, IMX_EDMA_V5, 64, 128, 32,
+                FSL_IMX95_EDMA_WAKEUP2_IRQ, FSL_IMX95_EDMA_WAKEUP2_ERR_IRQ },
+            [FSL_IMX95_EDMA_WAKEUP3] = {
+                FSL_IMX95_EDMA3, IMX_EDMA_V5, 64, 128, 32,
+                FSL_IMX95_EDMA_WAKEUP3_IRQ, FSL_IMX95_EDMA_WAKEUP3_ERR_IRQ },
+        };
+        SysBusDevice *sbd = SYS_BUS_DEVICE(&s->edma[i]);
+        DeviceState *edev = DEVICE(&s->edma[i]);
+        bool v5 = edma_table[i].version == IMX_EDMA_V5;
+
+	/* The model has a line for each channel */
+        unsigned nlines = v5 ? edma_table[i].channels / 2 : edma_table[i].channels;
+        unsigned ch;
+
+        qdev_prop_set_uint32(edev, "version", edma_table[i].version);
+        qdev_prop_set_uint32(edev, "num-channels", edma_table[i].channels);
+        qdev_prop_set_uint32(edev, "num-requests", edma_table[i].requests);
+        qdev_prop_set_bit(edev, "paired-irqs", v5);
+        object_property_set_link(OBJECT(edev), "dma", OBJECT(sysmem),
+                                 &error_abort);
+        if (!sysbus_realize(sbd, errp)) {
+            return;
+        }
+        sysbus_mmio_map(sbd, 0, fsl_imx95_memmap[edma_table[i].region].addr);
+        for (ch = 0; ch < edma_table[i].irq_lines; ch++) {
+            sysbus_connect_irq(sbd, ch,
+                qdev_get_gpio_in(gicdev, edma_table[i].irq_base + ch));
+        }
+        sysbus_connect_irq(sbd, nlines,
+                           qdev_get_gpio_in(gicdev, edma_table[i].err_irq));
+    }
+
     for (i = 0; i < FSL_IMX95_NUM_LPI2CS; i++) {
         static const struct {
             int region;
             unsigned int irq;
+            int edma;
+            unsigned int tx_req, rx_req;
         } lpi2c_table[FSL_IMX95_NUM_LPI2CS] = {
-            { FSL_IMX95_LPI2C1, FSL_IMX95_LPI2C1_IRQ },
-            { FSL_IMX95_LPI2C2, FSL_IMX95_LPI2C2_IRQ },
-            { FSL_IMX95_LPI2C3, FSL_IMX95_LPI2C3_IRQ },
-            { FSL_IMX95_LPI2C4, FSL_IMX95_LPI2C4_IRQ },
-            { FSL_IMX95_LPI2C5, FSL_IMX95_LPI2C5_IRQ },
-            { FSL_IMX95_LPI2C6, FSL_IMX95_LPI2C6_IRQ },
-            { FSL_IMX95_LPI2C7, FSL_IMX95_LPI2C7_IRQ },
-            { FSL_IMX95_LPI2C8, FSL_IMX95_LPI2C8_IRQ },
+            { FSL_IMX95_LPI2C1, FSL_IMX95_LPI2C1_IRQ, FSL_IMX95_EDMA_AON,
+              FSL_IMX95_DMAREQ_LPI2C1_TX, FSL_IMX95_DMAREQ_LPI2C1_RX },
+            { FSL_IMX95_LPI2C2, FSL_IMX95_LPI2C2_IRQ, FSL_IMX95_EDMA_AON,
+              FSL_IMX95_DMAREQ_LPI2C2_TX, FSL_IMX95_DMAREQ_LPI2C2_RX },
+            { FSL_IMX95_LPI2C3, FSL_IMX95_LPI2C3_IRQ, FSL_IMX95_EDMA_WAKEUP2,
+              FSL_IMX95_DMAREQ_LPI2C3_TX, FSL_IMX95_DMAREQ_LPI2C3_RX },
+            { FSL_IMX95_LPI2C4, FSL_IMX95_LPI2C4_IRQ, FSL_IMX95_EDMA_WAKEUP2,
+              FSL_IMX95_DMAREQ_LPI2C4_TX, FSL_IMX95_DMAREQ_LPI2C4_RX },
+            { FSL_IMX95_LPI2C5, FSL_IMX95_LPI2C5_IRQ, FSL_IMX95_EDMA_WAKEUP2,
+              FSL_IMX95_DMAREQ_LPI2C5_TX, FSL_IMX95_DMAREQ_LPI2C5_RX },
+            { FSL_IMX95_LPI2C6, FSL_IMX95_LPI2C6_IRQ, FSL_IMX95_EDMA_WAKEUP2,
+              FSL_IMX95_DMAREQ_LPI2C6_TX, FSL_IMX95_DMAREQ_LPI2C6_RX },
+            { FSL_IMX95_LPI2C7, FSL_IMX95_LPI2C7_IRQ, FSL_IMX95_EDMA_WAKEUP2,
+              FSL_IMX95_DMAREQ_LPI2C7_TX, FSL_IMX95_DMAREQ_LPI2C7_RX },
+            { FSL_IMX95_LPI2C8, FSL_IMX95_LPI2C8_IRQ, FSL_IMX95_EDMA_WAKEUP2,
+              FSL_IMX95_DMAREQ_LPI2C8_TX, FSL_IMX95_DMAREQ_LPI2C8_RX },
         };
         SysBusDevice *sbd = SYS_BUS_DEVICE(&s->lpi2c[i]);
 
@@ -682,6 +743,12 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
         sysbus_mmio_map(sbd, 0, fsl_imx95_memmap[lpi2c_table[i].region].addr);
         sysbus_connect_irq(sbd, 0,
             qdev_get_gpio_in(i == 0 ? m33dev : gicdev, lpi2c_table[i].irq));
+        qdev_connect_gpio_out_named(DEVICE(sbd), "tx-dma-req", 0,
+            qdev_get_gpio_in_named(DEVICE(&s->edma[lpi2c_table[i].edma]),
+                                   "dma-req", lpi2c_table[i].tx_req));
+        qdev_connect_gpio_out_named(DEVICE(sbd), "rx-dma-req", 0,
+            qdev_get_gpio_in_named(DEVICE(&s->edma[lpi2c_table[i].edma]),
+                                   "dma-req", lpi2c_table[i].rx_req));
     }
 
     /* uSDHCs */
@@ -971,6 +1038,7 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
         case FSL_IMX95_GIC_ITS:
         case FSL_IMX95_GIC_REDIST:
         case FSL_IMX95_GPIO1 ... FSL_IMX95_GPIO5:
+        case FSL_IMX95_EDMA1 ... FSL_IMX95_EDMA3:
         case FSL_IMX95_LPI2C1 ... FSL_IMX95_LPI2C8:
         case FSL_IMX95_LPUART_A55:
         case FSL_IMX95_LPUART_A55_ALIAS:
