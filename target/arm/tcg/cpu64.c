@@ -215,6 +215,7 @@ enum {
       .access = acc, .resetvalue = 0,                                      \
       .fieldoffset = offsetof(CPUARMState, cp15.impdef_regs[idx]) }
 
+/* Cortex-A55 IMPDEF registers: stored only, CPUPWRCTLR is used by WFI */
 static const ARMCPRegInfo cortex_a55_cp_reginfo[] = {
     A55_IMPDEF("CPUACTLR_EL1", 1, 0, 1, 0, PL1_RW, A55_CPUACTLR),
     A55_IMPDEF("CPUECTLR_EL1", 1, 0, 1, 4, PL1_RW, A55_CPUECTLR),

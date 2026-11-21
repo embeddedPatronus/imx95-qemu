@@ -1,5 +1,5 @@
 /*
- * i.MX95 ADC model
+ * NXP i.MX95 ADC model
  *
  * Copyright (c) 2026 Gaurav Sharma <gaurav.sharma0394@gmail.com>
  *
@@ -8,15 +8,9 @@
 
 #include "qemu/osdep.h"
 #include "qemu/bitops.h"
-#include "qemu/error-report.h"
-#include "qemu/log.h"
-#include "hw/core/qdev-properties.h"
+#include "hw/core/irq.h"
 #include "hw/misc/imx95_adc.h"
 #include "migration/vmstate.h"
-#include "hw/core/irq.h"
-#include "system/memory.h"
-
-#define IMX95_ADC_IRQ  199
 
 #define IMX95_ADC_MCR      0x000
 #define IMX95_ADC_MSR      0x004
@@ -27,6 +21,9 @@
 #define IMX95_ADC_PCDR0    0x100
 #define IMX95_ADC_CALSTAT  0x39c
 #define IMX95_ADC_CALCFG0  0x3a0
+
+#define IMX95_ADC_NUM_CHANNELS 8
+
 #define IMX95_ADC_MCR_NSTART   BIT(24)
 #define IMX95_ADC_MCR_CALSTART BIT(14)
 #define IMX95_ADC_MCR_PWDN     BIT(0)
@@ -45,152 +42,110 @@
 #define IMX95_ADC_IMR_ECH BIT(0)
 #define IMX95_ADC_IMR_EOC BIT(1)
 
-#define IMX95_ADC_PCDR_CDATA_MASK MAKE_64BIT_MASK(0, 12)
-
+static unsigned int imx95_adc_reg_index(hwaddr offset)
+{
+    return offset / sizeof(uint32_t);
+}
 
 static void imx95_adc_update_power_state(Imx95AdcState *s)
 {
-    uint32_t msr = s->regs[IMX95_ADC_MSR / sizeof(uint32_t)];
+    uint32_t *msr = &s->regs[imx95_adc_reg_index(IMX95_ADC_MSR)];
 
-    msr &= ~IMX95_ADC_MSR_STATUS_MASK;
-
-    if (s->regs[IMX95_ADC_MCR / sizeof(uint32_t)] &
+    *msr &= ~IMX95_ADC_MSR_STATUS_MASK;
+    if (s->regs[imx95_adc_reg_index(IMX95_ADC_MCR)] &
         IMX95_ADC_MCR_PWDN) {
-        msr |= IMX95_ADC_MSR_STATUS_POWER_DOWN;
+        *msr |= IMX95_ADC_MSR_STATUS_POWER_DOWN;
     } else {
-        msr |= IMX95_ADC_MSR_STATUS_IDLE;
+        *msr |= IMX95_ADC_MSR_STATUS_IDLE;
     }
-
-    s->regs[IMX95_ADC_MSR / sizeof(uint32_t)] = msr;
 }
 
 static void imx95_adc_complete_calibration(Imx95AdcState *s)
 {
-    uint32_t *mcr = &s->regs[IMX95_ADC_MCR / sizeof(uint32_t)];
-    uint32_t *msr = &s->regs[IMX95_ADC_MSR / sizeof(uint32_t)];
+    uint32_t *mcr = &s->regs[imx95_adc_reg_index(IMX95_ADC_MCR)];
+    uint32_t *msr = &s->regs[imx95_adc_reg_index(IMX95_ADC_MSR)];
 
+    /* Calibration always succeeds */
     *msr &= ~(IMX95_ADC_MSR_CALBUSY | IMX95_ADC_MSR_CALFAIL);
-    s->regs[IMX95_ADC_CALSTAT / sizeof(uint32_t)] = 0;
+    s->regs[imx95_adc_reg_index(IMX95_ADC_CALSTAT)] = 0;
     *mcr &= ~IMX95_ADC_MCR_CALSTART;
-
-    qemu_log_mask(LOG_GUEST_ERROR,
-                  "imx95.adc: calibration completed\n");
 }
 
 static void imx95_adc_complete_conversion(Imx95AdcState *s)
 {
-    uint32_t *mcr = &s->regs[IMX95_ADC_MCR / sizeof(uint32_t)];
-    uint32_t imr = s->regs[IMX95_ADC_IMR / sizeof(uint32_t)];
+    uint32_t *mcr = &s->regs[imx95_adc_reg_index(IMX95_ADC_MCR)];
+    uint32_t imr = s->regs[imx95_adc_reg_index(IMX95_ADC_IMR)];
     uint32_t channels =
-        s->regs[IMX95_ADC_NCMR0 / sizeof(uint32_t)] & UINT8_MAX;
+        s->regs[imx95_adc_reg_index(IMX95_ADC_NCMR0)] & UINT8_MAX;
     unsigned int channel;
 
-    for (channel = 0; channel < 8; channel++) {
+    /* Conversions are instant and every enabled channel reads 0 */
+    for (channel = 0; channel < IMX95_ADC_NUM_CHANNELS; channel++) {
         if (channels & BIT(channel)) {
-            s->regs[(IMX95_ADC_PCDR0 / sizeof(uint32_t)) + channel] =
-                0 & IMX95_ADC_PCDR_CDATA_MASK;
+            s->regs[imx95_adc_reg_index(IMX95_ADC_PCDR0) + channel] = 0;
         }
     }
 
-    s->regs[IMX95_ADC_ISR / sizeof(uint32_t)] |=
+    s->regs[imx95_adc_reg_index(IMX95_ADC_ISR)] |=
         IMX95_ADC_ISR_EOC_ECH;
-
     *mcr &= ~IMX95_ADC_MCR_NSTART;
 
     if (imr & (IMX95_ADC_IMR_EOC | IMX95_ADC_IMR_ECH)) {
         qemu_irq_pulse(s->irq);
     }
-
-    qemu_log_mask(LOG_GUEST_ERROR,
-                  "imx95.adc: conversion completed channels=0x%02x "
-                  "imr=0x%08x\n",
-                  channels, imr);
 }
 
-static uint64_t imx95_adc_read(void *opaque,
-                               hwaddr offset,
+static uint64_t imx95_adc_read(void *opaque, hwaddr offset,
                                unsigned int size)
 {
     Imx95AdcState *s = opaque;
-    uint32_t value;
 
     if (size != sizeof(uint32_t) ||
-        (offset & 3) != 0 ||
+        !QEMU_IS_ALIGNED(offset, sizeof(uint32_t)) ||
         offset >= IMX95_ADC_SIZE) {
         return 0;
     }
 
-    value = s->regs[offset / sizeof(uint32_t)];
-
-    if (offset == IMX95_ADC_MCR ||
-        offset == IMX95_ADC_MSR ||
-        offset == IMX95_ADC_ISR ||
-        offset == IMX95_ADC_IMR ||
-        offset == IMX95_ADC_CALSTAT) {
-        qemu_log_mask(LOG_GUEST_ERROR,
-                      "imx95.adc: read offset=0x%03" HWADDR_PRIx
-                      " value=0x%08x\n",
-                      offset, value);
-    }
-
-    return value;
+    return s->regs[imx95_adc_reg_index(offset)];
 }
 
-static void imx95_adc_write(void *opaque,
-                            hwaddr offset,
-                            uint64_t value,
-                            unsigned int size)
+static void imx95_adc_write(void *opaque, hwaddr offset,
+                            uint64_t value, unsigned int size)
 {
     Imx95AdcState *s = opaque;
     uint32_t old_value;
     uint32_t new_value = value;
 
     if (size != sizeof(uint32_t) ||
-        (offset & 3) != 0 ||
+        !QEMU_IS_ALIGNED(offset, sizeof(uint32_t)) ||
         offset >= IMX95_ADC_SIZE) {
         return;
     }
 
-    old_value = s->regs[offset / sizeof(uint32_t)];
+    old_value = s->regs[imx95_adc_reg_index(offset)];
 
     switch (offset) {
     case IMX95_ADC_MSR:
     case IMX95_ADC_CALSTAT:
         return;
-
     case IMX95_ADC_ISR:
-        s->regs[IMX95_ADC_ISR / sizeof(uint32_t)] &= ~new_value;
+        s->regs[imx95_adc_reg_index(IMX95_ADC_ISR)] &= ~new_value;
         return;
-
     case IMX95_ADC_MCR:
-        s->regs[IMX95_ADC_MCR / sizeof(uint32_t)] = new_value;
+        s->regs[imx95_adc_reg_index(IMX95_ADC_MCR)] = new_value;
         imx95_adc_update_power_state(s);
-
         if ((new_value & IMX95_ADC_MCR_CALSTART) &&
             !(old_value & IMX95_ADC_MCR_CALSTART)) {
             imx95_adc_complete_calibration(s);
         }
-
         if ((new_value & IMX95_ADC_MCR_NSTART) &&
             !(old_value & IMX95_ADC_MCR_NSTART)) {
             imx95_adc_complete_conversion(s);
         }
         break;
-
     default:
-        s->regs[offset / sizeof(uint32_t)] = new_value;
+        s->regs[imx95_adc_reg_index(offset)] = new_value;
         break;
-    }
-
-    if (offset == IMX95_ADC_MCR ||
-        offset == IMX95_ADC_IMR ||
-        offset == IMX95_ADC_CIMR0 ||
-        offset == IMX95_ADC_NCMR0 ||
-        offset == IMX95_ADC_CALCFG0) {
-        qemu_log_mask(LOG_GUEST_ERROR,
-                      "imx95.adc: write offset=0x%03" HWADDR_PRIx
-                      " old=0x%08x value=0x%08x\n",
-                      offset, old_value, new_value);
     }
 }
 
@@ -212,22 +167,23 @@ static const MemoryRegionOps imx95_adc_ops = {
 static void imx95_adc_reset(DeviceState *dev)
 {
     Imx95AdcState *s = IMX95_ADC(dev);
-    memset(s->regs, 0, sizeof(s->regs));
 
-    s->regs[IMX95_ADC_MCR / sizeof(uint32_t)] = IMX95_ADC_MCR_PWDN;
-    s->regs[IMX95_ADC_MSR / sizeof(uint32_t)] =
+    memset(s->regs, 0, sizeof(s->regs));
+    s->regs[imx95_adc_reg_index(IMX95_ADC_MCR)] = IMX95_ADC_MCR_PWDN;
+    s->regs[imx95_adc_reg_index(IMX95_ADC_MSR)] =
         IMX95_ADC_MSR_STATUS_POWER_DOWN;
-    s->regs[IMX95_ADC_CALSTAT / sizeof(uint32_t)] = 0;
+    qemu_irq_lower(s->irq);
 }
 
 static void imx95_adc_init(Object *obj)
 {
     Imx95AdcState *s = IMX95_ADC(obj);
+    SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
 
     memory_region_init_io(&s->iomem, obj, &imx95_adc_ops, s,
                           TYPE_IMX95_ADC, IMX95_ADC_SIZE);
-    sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->iomem);
-    sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq);
+    sysbus_init_mmio(sbd, &s->iomem);
+    sysbus_init_irq(sbd, &s->irq);
 }
 
 static const VMStateDescription vmstate_imx95_adc = {
@@ -235,9 +191,10 @@ static const VMStateDescription vmstate_imx95_adc = {
     .version_id = 1,
     .minimum_version_id = 1,
     .fields = (const VMStateField[]) {
-        VMSTATE_UINT32_ARRAY(regs, Imx95AdcState, IMX95_ADC_SIZE / sizeof(uint32_t)),
+        VMSTATE_UINT32_ARRAY(regs, Imx95AdcState,
+                             IMX95_ADC_REG_COUNT),
         VMSTATE_END_OF_LIST()
-    }
+    },
 };
 
 static void imx95_adc_class_init(ObjectClass *oc, const void *data)
@@ -246,7 +203,7 @@ static void imx95_adc_class_init(ObjectClass *oc, const void *data)
 
     device_class_set_legacy_reset(dc, imx95_adc_reset);
     dc->vmsd = &vmstate_imx95_adc;
-    dc->desc = "i.MX95 adc";
+    dc->desc = "i.MX95 ADC";
 }
 
 static const TypeInfo imx95_adc_types[] = {
@@ -260,3 +217,4 @@ static const TypeInfo imx95_adc_types[] = {
 };
 
 DEFINE_TYPES(imx95_adc_types)
+

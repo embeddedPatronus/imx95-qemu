@@ -109,11 +109,12 @@ static void imx95_src_gen_write(void *opaque, hwaddr offset,
     {
         int line = -1;
 
-        if (slice_base == IMX95_SRC_GEN_A55_PLATFORM_SLICE) {
-            line = 6;
-        } else if (slice_base >= IMX95_SRC_GEN_A55_CORE0_SLICE &&
-                   slice_base <= IMX95_SRC_GEN_A55_CORE0_SLICE + 5 * IMX95_SRC_GEN_SLICE_SIZE) {
-            line = (slice_base - IMX95_SRC_GEN_A55_CORE0_SLICE) /
+        if (slice_base == s->a55_platform_slice) {
+            line = s->num_a55;
+        } else if (slice_base >= s->a55_core0_slice &&
+                   slice_base < s->a55_core0_slice +
+                                s->num_a55 * IMX95_SRC_GEN_SLICE_SIZE) {
+            line = (slice_base - s->a55_core0_slice) /
                    IMX95_SRC_GEN_SLICE_SIZE;
         }
         if (line >= 0) {
@@ -138,6 +139,7 @@ static void imx95_src_gen_write(void *opaque, hwaddr offset,
         return;
     }
 
+    /* Power status follows PDN_SOFT at once */
     if ((new_value & IMX95_SRC_GEN_SLICE_PDN_SOFT) != 0U) {
         s->regs[func_stat_offset / sizeof(uint32_t)] =
             IMX95_SRC_GEN_FUNC_STAT_PDN;
@@ -177,6 +179,7 @@ static void imx95_src_gen_reset(DeviceState *dev)
 
     hwaddr slice_base;
 
+    /* All slices start powered up and out of reset */
     for (slice_base = IMX95_SRC_GEN_SLICE_SIZE;
          slice_base + IMX95_SRC_GEN_FUNC_STAT_OFFSET <
              IMX95_SRC_GEN_SIZE;
@@ -194,8 +197,17 @@ static void imx95_src_gen_init(Object *obj)
     memory_region_init_io(&s->iomem, obj, &imx95_src_gen_ops, s,
                           TYPE_IMX95_SRC_GEN, IMX95_SRC_GEN_SIZE);
     sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->iomem);
-    qdev_init_gpio_out_named(DEVICE(obj), s->a55_hold, "a55-hold", 7);
+    qdev_init_gpio_out_named(DEVICE(obj), s->a55_hold, "a55-hold",
+                             IMX95_SRC_GEN_MAX_A55 + 1);
 }
+
+static const Property imx95_src_gen_properties[] = {
+    DEFINE_PROP_UINT32("a55-core0-slice", Imx95SrcGenState, a55_core0_slice,
+                       IMX95_SRC_GEN_A55_CORE0_SLICE),
+    DEFINE_PROP_UINT32("a55-platform-slice", Imx95SrcGenState,
+                       a55_platform_slice, IMX95_SRC_GEN_A55_PLATFORM_SLICE),
+    DEFINE_PROP_UINT32("num-a55", Imx95SrcGenState, num_a55, 6),
+};
 
 static const VMStateDescription vmstate_imx95_src_gen = {
     .name = TYPE_IMX95_SRC_GEN,
@@ -214,6 +226,7 @@ static void imx95_src_gen_class_init(ObjectClass *oc, const void *data)
     device_class_set_legacy_reset(dc, imx95_src_gen_reset);
     dc->vmsd = &vmstate_imx95_src_gen;
     dc->desc = "i.MX95 src gen";
+    device_class_set_props(dc, imx95_src_gen_properties);
 }
 
 static const TypeInfo imx95_src_gen_types[] = {

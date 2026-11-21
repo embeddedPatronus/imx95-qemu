@@ -14,14 +14,21 @@
 #define TYPE_IMX95_MU "imx95-mu"
 OBJECT_DECLARE_SIMPLE_TYPE(IMX95MUState, IMX95_MU)
 
+#define IMX95_MU_NUM_SIDES    2
 #define IMX95_MU_NUM_CHANNELS 4
 #define IMX95_MU_MMIO_SIZE    0x1000
+
+typedef struct IMX95MUEndpoint {
+    IMX95MUState *mu;
+    unsigned int side;
+} IMX95MUEndpoint;
 
 struct IMX95MUState {
     SysBusDevice parent_obj;
 
-    MemoryRegion iomem[2];
-    qemu_irq irq[2];
+    MemoryRegion iomem[IMX95_MU_NUM_SIDES];
+    qemu_irq irq[IMX95_MU_NUM_SIDES];
+    IMX95MUEndpoint endpoint[IMX95_MU_NUM_SIDES];
 
     uint32_t cr[2];
     uint32_t ccr0[2];
@@ -30,6 +37,7 @@ struct IMX95MUState {
     uint32_t fcr[2];
     uint32_t flags;
     uint32_t gier[2];
+    uint32_t gier_reset[2];
     uint32_t gp_pending[2];
     uint32_t tcr[2];
     uint32_t rcr[2];
@@ -41,3 +49,4 @@ struct IMX95MUState {
 };
 
 #endif
+

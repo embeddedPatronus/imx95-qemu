@@ -131,6 +131,11 @@ static const Imx95PcieSerdesReg imx95_pcie_serdes_regs[] = {
     { 0x3010, 0x00000000, false, "RST_CTRL" },
 };
 
+static unsigned int imx95_pcie_serdes_reg_index(hwaddr offset)
+{
+    return offset / sizeof(uint32_t);
+}
+
 static const Imx95PcieSerdesReg *imx95_pcie_serdes_find(hwaddr offset)
 {
     for (size_t i = 0; i < ARRAY_SIZE(imx95_pcie_serdes_regs); i++) {
@@ -154,7 +159,7 @@ static uint64_t imx95_pcie_serdes_read(void *opaque, hwaddr offset,
         return 0;
     }
 
-    value = s->regs[offset / 4];
+    value = s->regs[imx95_pcie_serdes_reg_index(offset)];
 
     /*
      * MPLL lock indicator
@@ -199,18 +204,18 @@ static void imx95_pcie_serdes_write(void *opaque, hwaddr offset,
         break;
     case PE0_LUT_INT_STS:
         /* LUTWMS and LUTRMS are write-one-to-clear, the rest is reserved */
-        v = s->regs[PE0_LUT_INT_STS / 4] & ~(v & (LUT_INT_WMS | LUT_INT_RMS));
+        v = s->regs[imx95_pcie_serdes_reg_index(PE0_LUT_INT_STS)] & ~(v & (LUT_INT_WMS | LUT_INT_RMS));
         break;
     case PE0_LUT_ACSCTRL: {
         unsigned entry = v & LUT_ACS_ENLOC;
 
         v &= LUT_ACS_RWA | LUT_ACS_ENLOC;
         if (v & LUT_ACS_RWA) {
-            s->regs[PE0_LUT_DATA1 / 4] = s->lut[entry][0];
-            s->regs[PE0_LUT_DATA2 / 4] = s->lut[entry][1];
+            s->regs[imx95_pcie_serdes_reg_index(PE0_LUT_DATA1)] = s->lut[entry][0];
+            s->regs[imx95_pcie_serdes_reg_index(PE0_LUT_DATA2)] = s->lut[entry][1];
         } else {
-            s->lut[entry][0] = s->regs[PE0_LUT_DATA1 / 4];
-            s->lut[entry][1] = s->regs[PE0_LUT_DATA2 / 4];
+            s->lut[entry][0] = s->regs[imx95_pcie_serdes_reg_index(PE0_LUT_DATA1)];
+            s->lut[entry][1] = s->regs[imx95_pcie_serdes_reg_index(PE0_LUT_DATA2)];
         }
         break;
     }
@@ -218,12 +223,13 @@ static void imx95_pcie_serdes_write(void *opaque, hwaddr offset,
         break;
     }
 
-    s->regs[offset / 4] = v;
+    s->regs[imx95_pcie_serdes_reg_index(offset)] = v;
 }
 
 static bool imx95_pcie_serdes_lut_lookup(Imx95PcieSerdesSsState *s,
                                          uint16_t rid, uint8_t *sid)
 {
+    /* The highest valid entry that matches wins */
     for (int i = IMX95_PCIE_SERDES_SS_LUT_ENTRIES - 1; i >= 0; i--) {
         uint32_t d1 = s->lut[i][0];
         uint32_t d2 = s->lut[i][1];
@@ -247,13 +253,15 @@ static MemTxResult imx95_pcie_msi_doorbell_write(void *opaque, hwaddr addr,
     uint8_t sid;
 
     if (!imx95_pcie_serdes_lut_lookup(s, attrs.requester_id, &sid)) {
-        s->regs[PE0_LUT_INT_STS / 4] |= LUT_INT_WMS;
+        /* LUT miss: flag LUTWMS and drop the MSI */
+        s->regs[imx95_pcie_serdes_reg_index(PE0_LUT_INT_STS)] |= LUT_INT_WMS;
         qemu_log_mask(LOG_GUEST_ERROR,
                       "imx95.pcie-serdes-ss: MSI from requester 0x%04x matches no LUT entry\n",
                       attrs.requester_id);
         return MEMTX_OK;
     }
 
+    /* Forward with the LUT SID so the ITS sees the DT msi-map DeviceID */
     fwd.requester_id = (s->devid_prefix | sid) & 0xffff;
     if (size == 2) {
         return address_space_stw_le(&address_space_memory, s->msi_target, data,
@@ -293,7 +301,8 @@ static void imx95_pcie_serdes_reset(DeviceState *dev)
     memset(s->lut, 0, sizeof(s->lut));
     qemu_set_irq(s->ltssm_en, 0);
     for (size_t i = 0; i < ARRAY_SIZE(imx95_pcie_serdes_regs); i++) {
-        s->regs[imx95_pcie_serdes_regs[i].offset / 4] =
+        s->regs[imx95_pcie_serdes_reg_index(
+            imx95_pcie_serdes_regs[i].offset)] =
             imx95_pcie_serdes_regs[i].reset;
     }
 }
@@ -314,10 +323,22 @@ static void imx95_pcie_serdes_init(Object *obj)
     sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->msi_doorbell);
 }
 
+static int imx95_pcie_serdes_post_load(void *opaque, int version_id)
+{
+    Imx95PcieSerdesSsState *s = opaque;
+
+    qemu_set_irq(s->ltssm_en,
+                 s->regs[imx95_pcie_serdes_reg_index(PE0_GEN_CTRL_3)] &
+                 GEN_CTRL_3_LTSSM_EN);
+
+    return 0;
+}
+
 static const VMStateDescription vmstate_imx95_pcie_serdes = {
     .name = TYPE_IMX95_PCIE_SERDES_SS,
     .version_id = 1,
     .minimum_version_id = 1,
+    .post_load = imx95_pcie_serdes_post_load,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT32_ARRAY(regs, Imx95PcieSerdesSsState,
                              IMX95_PCIE_SERDES_SS_NUM_REGS),
@@ -354,3 +375,4 @@ static const TypeInfo imx95_pcie_serdes_types[] = {
 };
 
 DEFINE_TYPES(imx95_pcie_serdes_types)
+

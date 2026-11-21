@@ -7,14 +7,8 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu/bitops.h"
-#include "qemu/error-report.h"
-#include "qemu/log.h"
-#include "hw/core/qdev-properties.h"
 #include "hw/misc/imx95_bbnsm.h"
 #include "migration/vmstate.h"
-#include "hw/core/irq.h"
-#include "system/memory.h"
 
 #define BBNSM_VID       0x000
 #define BBNSM_FEATURES  0x004
@@ -27,134 +21,99 @@
 #define BBNSM_TA        0x050
 #define BBNSM_GPR_BASE  0x300
 #define BBNSM_GPR_END   0x320
+
 #define BBNSM_FEATURES_GPR_SZ (8U << 2)
+#define BBNSM_VID_RESET       0x00010001
 
-
-static uint32_t imx95_extract_subword(uint32_t value, hwaddr byte_offset,
-                                      unsigned size)
+static unsigned int imx95_bbnsm_reg_index(hwaddr offset)
 {
-    unsigned shift = (byte_offset & 3U) * 8U;
+    return offset / sizeof(uint32_t);
+}
+
+static uint32_t imx95_bbnsm_access_mask(hwaddr offset,
+                                        unsigned int size)
+{
+    unsigned int shift = (offset & 3U) * 8U;
 
     switch (size) {
     case 1:
-        return (value >> shift) & UINT8_MAX;
+        return (uint32_t)UINT8_MAX << shift;
     case 2:
-        return (value >> shift) & UINT16_MAX;
+        return (uint32_t)UINT16_MAX << shift;
     case 4:
-        return value;
+        return UINT32_MAX;
     default:
         return 0;
     }
 }
 
-static uint64_t imx95_bbnsm_read(void *opaque, hwaddr offset, unsigned size)
+static uint32_t imx95_bbnsm_extract_subword(uint32_t value,
+                                            hwaddr offset,
+                                            unsigned int size)
+{
+    unsigned int shift = (offset & 3U) * 8U;
+
+    return (value & imx95_bbnsm_access_mask(offset, size)) >> shift;
+}
+
+static uint32_t imx95_bbnsm_merge_subword(uint32_t old_value,
+                                          hwaddr offset,
+                                          uint64_t value,
+                                          unsigned int size)
+{
+    unsigned int shift = (offset & 3U) * 8U;
+    uint32_t mask = imx95_bbnsm_access_mask(offset, size);
+
+    return (old_value & ~mask) | (((uint32_t)value << shift) & mask);
+}
+
+static uint64_t imx95_bbnsm_read(void *opaque, hwaddr offset,
+                                 unsigned int size)
 {
     Imx95BbnsmState *s = opaque;
-    hwaddr word_offset = offset & ~3ULL;
+    hwaddr word_offset = offset & ~(hwaddr)3;
     uint32_t value;
 
     if (word_offset >= IMX95_BBNSM_SIZE) {
         return 0;
     }
 
-    value = s->regs[word_offset / 4];
+    value = s->regs[imx95_bbnsm_reg_index(word_offset)];
+    s->read_count++;
 
-    switch (word_offset) {
-    case BBNSM_VID:
-    case BBNSM_FEATURES:
-    case BBNSM_CTRL:
-    case BBNSM_INT_EN:
-    case BBNSM_EVENTS:
-        return s->regs[offset / 4];
-    case BBNSM_PAD_CTRL:
-    case BBNSM_RTC_LS:
-    case BBNSM_RTC_MS:
-    case BBNSM_TA:
-    default:
-	break;
-    }
-     s->read_count++;
-
-    if (s->read_count <= 256 ||
-        word_offset == BBNSM_VID ||
-        word_offset == BBNSM_FEATURES ||
-        word_offset == BBNSM_CTRL ||
-        word_offset == BBNSM_EVENTS ||
-        (word_offset >= BBNSM_GPR_BASE &&
-         word_offset < BBNSM_GPR_END)) {
-        qemu_log_mask(LOG_GUEST_ERROR,
-                      "imx95.bbnsm: read count=%" PRIu64
-                      " offset=0x%04" HWADDR_PRIx
-                      " size=%u value=0x%08x\n",
-                      s->read_count,
-                      offset,
-                      size,
-                      value);
-    }
-
-    return imx95_extract_subword(value, offset, size);
+    return imx95_bbnsm_extract_subword(value, offset, size);
 }
 
 static void imx95_bbnsm_write(void *opaque, hwaddr offset,
-                              uint64_t value, unsigned size)
+                               uint64_t value, unsigned int size)
 {
     Imx95BbnsmState *s = opaque;
-    hwaddr word_offset = offset & ~3ULL;
-    unsigned shift;
-    uint32_t mask;
+    hwaddr word_offset = offset & ~(hwaddr)3;
+    unsigned int index;
     uint32_t old_value;
     uint32_t new_value;
+    uint32_t write_mask;
 
     if (word_offset >= IMX95_BBNSM_SIZE) {
         return;
     }
 
-    old_value = s->regs[word_offset / 4];
-
-    switch (size) {
-    case 1:
-        shift = (offset & 3U) * 8U;
-        mask = UINT8_MAX << shift;
-        new_value = (old_value & ~mask) |
-                    ((((uint32_t)value) << shift) & mask);
-        break;
-    case 2:
-        shift = (offset & 2U) * 8U;
-        mask = UINT16_MAX << shift;
-        new_value = (old_value & ~mask) |
-                    ((((uint32_t)value) << shift) & mask);
-        break;
-    case 4:
-        new_value = (uint32_t)value;
-        break;
-    default:
-        return;
-    }
-
+    index = imx95_bbnsm_reg_index(word_offset);
+    old_value = s->regs[index];
+    new_value = imx95_bbnsm_merge_subword(old_value, offset, value, size);
+    write_mask = imx95_bbnsm_access_mask(offset, size);
     s->write_count++;
-
-    qemu_log_mask(LOG_GUEST_ERROR,
-                  "imx95.bbnsm: write count=%" PRIu64
-                  " offset=0x%04" HWADDR_PRIx
-                  " size=%u old=0x%08x value=0x%08" PRIx64
-                  " new=0x%08x\n",
-                  s->write_count,
-                  offset,
-                  size,
-                  old_value,
-                  value,
-                  new_value);
 
     switch (word_offset) {
     case BBNSM_VID:
     case BBNSM_FEATURES:
         break;
+    /* Write-one-to-clear */
     case BBNSM_EVENTS:
-        s->regs[word_offset / 4] &= ~new_value;
+        s->regs[index] &= ~(new_value & write_mask);
         break;
-
     default:
-        s->regs[word_offset / 4] = new_value;
+        s->regs[index] = new_value;
         break;
     }
 }
@@ -162,11 +121,11 @@ static void imx95_bbnsm_write(void *opaque, hwaddr offset,
 static const MemoryRegionOps imx95_bbnsm_ops = {
     .read = imx95_bbnsm_read,
     .write = imx95_bbnsm_write,
-    .endianness = DEVICE_NATIVE_ENDIAN,
+    .endianness = DEVICE_LITTLE_ENDIAN,
     .valid = {
         .min_access_size = 1,
         .max_access_size = 4,
-	.unaligned = false,
+        .unaligned = false,
     },
     .impl = {
         .min_access_size = 1,
@@ -174,25 +133,27 @@ static const MemoryRegionOps imx95_bbnsm_ops = {
     },
 };
 
+/* The RTC and alarm are not modelled */
 static void imx95_bbnsm_reset(DeviceState *dev)
 {
     Imx95BbnsmState *s = IMX95_BBNSM(dev);
+
     memset(s->regs, 0, sizeof(s->regs));
     s->read_count = 0;
     s->write_count = 0;
-
-
-    s->regs[BBNSM_FEATURES / 4] = BBNSM_FEATURES_GPR_SZ;
-    s->regs[BBNSM_VID / 4] = 0x00010001;
+    s->regs[imx95_bbnsm_reg_index(BBNSM_FEATURES)] =
+        BBNSM_FEATURES_GPR_SZ;
+    s->regs[imx95_bbnsm_reg_index(BBNSM_VID)] = BBNSM_VID_RESET;
 }
 
 static void imx95_bbnsm_init(Object *obj)
 {
     Imx95BbnsmState *s = IMX95_BBNSM(obj);
+    SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
 
     memory_region_init_io(&s->iomem, obj, &imx95_bbnsm_ops, s,
                           TYPE_IMX95_BBNSM, IMX95_BBNSM_SIZE);
-    sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->iomem);
+    sysbus_init_mmio(sbd, &s->iomem);
 }
 
 static const VMStateDescription vmstate_imx95_bbnsm = {
@@ -200,11 +161,12 @@ static const VMStateDescription vmstate_imx95_bbnsm = {
     .version_id = 1,
     .minimum_version_id = 1,
     .fields = (const VMStateField[]) {
-        VMSTATE_UINT32_ARRAY(regs, Imx95BbnsmState, IMX95_BBNSM_SIZE / 4),
+        VMSTATE_UINT32_ARRAY(regs, Imx95BbnsmState,
+                             IMX95_BBNSM_REG_COUNT),
         VMSTATE_UINT64(read_count, Imx95BbnsmState),
         VMSTATE_UINT64(write_count, Imx95BbnsmState),
         VMSTATE_END_OF_LIST()
-    }
+    },
 };
 
 static void imx95_bbnsm_class_init(ObjectClass *oc, const void *data)
@@ -213,7 +175,7 @@ static void imx95_bbnsm_class_init(ObjectClass *oc, const void *data)
 
     device_class_set_legacy_reset(dc, imx95_bbnsm_reset);
     dc->vmsd = &vmstate_imx95_bbnsm;
-    dc->desc = "i.MX95 bbnsm";
+    dc->desc = "i.MX95 BBNSM";
 }
 
 static const TypeInfo imx95_bbnsm_types[] = {
@@ -227,3 +189,4 @@ static const TypeInfo imx95_bbnsm_types[] = {
 };
 
 DEFINE_TYPES(imx95_bbnsm_types)
+

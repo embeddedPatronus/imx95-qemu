@@ -24,7 +24,11 @@ OBJECT_DECLARE_SIMPLE_TYPE(Imx95PcieHost, IMX95_PCIE_HOST)
 #define TYPE_IMX95_PCIE_ROOT "imx95.pcie-root"
 OBJECT_DECLARE_SIMPLE_TYPE(Imx95PcieRoot, IMX95_PCIE_ROOT)
 
+void imx95_pcie_host_add_dma_window(Imx95PcieHost *s, hwaddr addr,
+                                      MemoryRegion *mr, int priority);
+
 #define IMX95_PCIE_NUM_ATU       8
+#define IMX95_PCIE_NUM_INTX      4
 #define IMX95_PCIE_IO_SIZE       (1 * MiB)
 
 /* port logic registers 0x700 to 0x8ff kept as storage */
@@ -44,7 +48,7 @@ typedef struct Imx95PcieAtu {
 } Imx95PcieAtu;
 
 typedef struct Imx95PcieMap {
-    unsigned kind;
+    unsigned int kind;
     uint64_t base;
     uint64_t size;
     uint64_t offset;
@@ -52,7 +56,7 @@ typedef struct Imx95PcieMap {
 
 typedef struct Imx95PcieOb {
     Imx95PcieHost *host;
-    unsigned index;
+    unsigned int index;
     MemoryRegion mem;
     MemoryRegion io;
     MemoryRegion cfg;
@@ -87,7 +91,7 @@ struct Imx95PcieHost {
     MemoryRegion inbound;
     AddressSpace address_space;
 
-    qemu_irq irqs[4];
+    qemu_irq irqs[IMX95_PCIE_NUM_INTX];
     qemu_irq msi;
     bool ltssm_en;
 
@@ -98,3 +102,4 @@ struct Imx95PcieHost {
 };
 
 #endif /* HW_PCI_HOST_IMX95_PCIE_HOST_H */
+

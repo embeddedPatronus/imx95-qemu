@@ -2,7 +2,7 @@
  * NXP i.MX95 SoC emulation
  *
  * Models six Cortex-A55 cores behind a GICv3, the Cortex-M33 System
- * Manager core with its NVIC, the memory map and the peripherals.
+ * Manager core, the Cortex-M7 core, the memory map and the peripherals.
  *
  * Copyright (c) 2026 Gaurav Sharma <gaurav.sharma0394@gmail.com>
  *
@@ -13,7 +13,6 @@
 #include "qemu/bitops.h"
 #include "qemu/main-loop.h"
 #include "qapi/error.h"
-#include "qemu/error-report.h"
 #include "qobject/qlist.h"
 #include "system/address-spaces.h"
 #include "system/reset.h"
@@ -29,35 +28,51 @@
 #include "hw/misc/unimp.h"
 #include "target/arm/gtimer.h"
 
-static const struct {
+typedef struct FslImx95MemoryMapEntry {
     hwaddr addr;
-    size_t size;
+    hwaddr size;
     const char *name;
-} fsl_imx95_memmap[] = {
+} FslImx95MemoryMapEntry;
+
+static const FslImx95MemoryMapEntry fsl_imx95_memmap[] = {
     [FSL_IMX95_A55_OCRAM] = { 0x20480000, 1 * MiB, "imx95.a55.ocram" },
     [FSL_IMX95_A55_TMPSNS] = { 0x4a440000, 4 * KiB, "imx95.a55-tmpsns" },
     [FSL_IMX95_ADC] = { 0x44530000, 64 * KiB, "imx95.adc" },
     [FSL_IMX95_AON_MU1_A] = { 0x44220000, 64 * KiB, "imx95.aon-mu1-a" },
     [FSL_IMX95_AON_MU1_B] = { 0x44230000, 64 * KiB, "imx95.aon-mu1-b" },
     [FSL_IMX95_AON_MU1_SRAM_A] = { 0x44221000, 4 * KiB, "imx95.aon-mu1-sram" },
-    [FSL_IMX95_AON_MU1_SRAM_B] = { 0x44231000, 4 * KiB, "imx95.aon-mu1-sram-b-alias" },
+    [FSL_IMX95_AON_MU1_SRAM_B] = {
+        0x44231000, 4 * KiB, "imx95.aon-mu1-sram-b-alias"
+    },
     [FSL_IMX95_AON_MU2_A] = { 0x445b0000, 64 * KiB, "imx95.aon-mu2-a" },
     [FSL_IMX95_AON_MU2_B] = { 0x445c0000, 64 * KiB, "imx95.aon-mu2-b" },
     [FSL_IMX95_AON_MU2_SRAM_A] = { 0x445b1000, 1 * KiB, "imx95.aon-mu2-sram" },
-    [FSL_IMX95_AON_MU2_SRAM_B] = { 0x445c1000, 1 * KiB, "imx95.aon-mu2-sram-b-alias" },
+    [FSL_IMX95_AON_MU2_SRAM_B] = {
+        0x445c1000, 1 * KiB, "imx95.aon-mu2-sram-b-alias"
+    },
     [FSL_IMX95_AON_MU5_A] = { 0x44610000, 64 * KiB, "imx95.aon-mu5-a" },
     [FSL_IMX95_AON_MU5_B] = { 0x44620000, 64 * KiB, "imx95.aon-mu5-b" },
     [FSL_IMX95_AON_MU5_SRAM_A] = { 0x44611000, 4 * KiB, "imx95.aon-mu5-sram" },
-    [FSL_IMX95_AON_MU5_SRAM_B] = { 0x44621000, 4 * KiB, "imx95.aon-mu5-sram-b-alias" },
+    [FSL_IMX95_AON_MU5_SRAM_B] = {
+        0x44621000, 4 * KiB, "imx95.aon-mu5-sram-b-alias"
+    },
     [FSL_IMX95_BBNSM] = { 0x44440000, 64 * KiB, "imx95.bbnsm" },
-    [FSL_IMX95_BLK_CTRL_GPUMIX] = { 0x4d810000, 64 * KiB, "imx95.blk-ctrl-gpumix" },
-    [FSL_IMX95_BLK_CTRL_S_AONMIX] = { 0x444f0000, 64 * KiB, "imx95.blk-ctrl-s-aonmix" },
-    [FSL_IMX95_BLK_CTRL_WAKEUPMIX1] = { 0x42420000, 64 * KiB, "imx95.blk-ctrl-wakeupmix1" },
+    [FSL_IMX95_BLK_CTRL_GPUMIX] = {
+        0x4d810000, 64 * KiB, "imx95.blk-ctrl-gpumix"
+    },
+    [FSL_IMX95_BLK_CTRL_S_AONMIX] = {
+        0x444f0000, 64 * KiB, "imx95.blk-ctrl-s-aonmix"
+    },
+    [FSL_IMX95_BLK_CTRL_WAKEUPMIX1] = {
+        0x42420000, 64 * KiB, "imx95.blk-ctrl-wakeupmix1"
+    },
     [FSL_IMX95_CAMERA_CSR] = { 0x4ac10000, 64 * KiB, "imx95.camera-csr" },
     [FSL_IMX95_CAMERA_NOC] = { 0x4aff0000, 64 * KiB, "imx95.camera-noc" },
     [FSL_IMX95_CCM] = { 0x44450000, 64 * KiB, "imx95.ccm" },
     [FSL_IMX95_DDRMIX] = { 0x5d000000, 32 * MiB, "imx95.ddrmix" },
-    [FSL_IMX95_DISPLAYMIX_IRQSTEER] = { 0x4b0b0000, 4 * KiB, "imx95.displaymix-irqsteer" },
+    [FSL_IMX95_DISPLAYMIX_IRQSTEER] = {
+        0x4b0b0000, 4 * KiB, "imx95.displaymix-irqsteer"
+    },
     [FSL_IMX95_EDMA1] = { 0x44000000, 2112 * KiB, "imx95.edma1" },
     [FSL_IMX95_EDMA2] = { 0x42000000, 2112 * KiB, "imx95.edma2" },
     [FSL_IMX95_EDMA3] = { 0x42210000, 2112 * KiB, "imx95.edma3" },
@@ -88,12 +103,16 @@ static const struct {
     [FSL_IMX95_LPI2C7] = { 0x426d0000, 64 * KiB, "imx95.lpi2c7" },
     [FSL_IMX95_LPI2C8] = { 0x426e0000, 64 * KiB, "imx95.lpi2c8" },
     [FSL_IMX95_LPUART_A55] = { 0x44380000, 64 * KiB, "imx95.lpuart-a55" },
-    [FSL_IMX95_LPUART_A55_ALIAS] = { 0x5a060000, 64 * KiB, "imx8-lpuart6-alias" },
+    [FSL_IMX95_LPUART_A55_ALIAS] = {
+        0x5a060000, 64 * KiB, "imx8-lpuart6-alias"
+    },
     [FSL_IMX95_LPUART_SM] = { 0x44390000, 64 * KiB, "imx95.lpuart-sm" },
     [FSL_IMX95_LPUART_M7] = { 0x42570000, 64 * KiB, "imx95.lpuart-m7" },
     [FSL_IMX95_M33_CODE_TCM] = { 0x1ffc0000, 256 * KiB, "imx95.m33.code-tcm" },
     [FSL_IMX95_M33_DATA_TCM] = { 0x20000000, 256 * KiB, "imx95.m33.data-tcm" },
-    [FSL_IMX95_M33_XCACHE_LPCAC] = { 0x44400000, 64 * KiB, "imx95.m33-xcache-lpcac" },
+    [FSL_IMX95_M33_XCACHE_LPCAC] = {
+        0x44400000, 64 * KiB, "imx95.m33-xcache-lpcac"
+    },
     [FSL_IMX95_MU3] = { 0x445d0000, 64 * KiB, "imx95.mu3" },
     [FSL_IMX95_MU4] = { 0x445f0000, 64 * KiB, "imx95.mu4" },
     [FSL_IMX95_MU6] = { 0x44630000, 64 * KiB, "imx95.mu6" },
@@ -103,8 +122,12 @@ static const struct {
     [FSL_IMX95_NETC_ECAM1] = { 0x4cb00000, 1 * MiB, "imx95.netc-ecam1" },
     [FSL_IMX95_NETC_IERB] = { 0x4cde0000, 64 * KiB, "imx95.netc-ierb" },
     [FSL_IMX95_NETC_PRB] = { 0x4cdf0000, 64 * KiB, "imx95.netc-prb" },
-    [FSL_IMX95_NOCMIX_BLK_CTRL] = { 0x49000000, 64 * KiB, "imx95.nocmix-blk-ctrl" },
-    [FSL_IMX95_NOC_CAMERA_BLK_CTRL] = { 0x49062000, 64 * KiB, "imx95.noc-camera-blk-ctrl" },
+    [FSL_IMX95_NOCMIX_BLK_CTRL] = {
+        0x49000000, 64 * KiB, "imx95.nocmix-blk-ctrl"
+    },
+    [FSL_IMX95_NOC_CAMERA_BLK_CTRL] = {
+        0x49062000, 64 * KiB, "imx95.noc-camera-blk-ctrl"
+    },
     [FSL_IMX95_NOC_SRAMCTL] = { 0x490a0000, 64 * KiB, "imx95.noc-sramctl" },
     [FSL_IMX95_OSC24M] = { 0x44480000, 4 * KiB, "imx95.osc24m" },
     [FSL_IMX95_PCIE0] = { 0x4c300000, 64 * KiB, "imx95.pcie0" },
@@ -113,7 +136,9 @@ static const struct {
     [FSL_IMX95_PCIE1] = { 0x4c380000, 64 * KiB, "imx95.pcie1" },
     [FSL_IMX95_PCIE1_APP] = { 0x4c3c0000, 16 * KiB, "imx95.pcie1-app" },
     [FSL_IMX95_PCIE1_ATU] = { 0x4c3e0000, 64 * KiB, "imx95.pcie1-atu" },
-    [FSL_IMX95_PERIPH_CATCHALL] = { 0x40000000, 256 * MiB, "imx95.periph-catchall" },
+    [FSL_IMX95_PERIPH_CATCHALL] = {
+        0x40000000, 256 * MiB, "imx95.periph-catchall"
+    },
     [FSL_IMX95_RAM] = { 0x80000000, 16 * GiB, "ram" },
     [FSL_IMX95_SAR_ADC] = { 0x443c0000, 64 * KiB, "imx95.sar-adc" },
     [FSL_IMX95_SC_MU] = { 0x5d1c0000, 64 * KiB, "imx95.sc-mu" },
@@ -141,7 +166,7 @@ static const struct {
     [FSL_IMX95_USB_CTRL] = { 0x4c1f0000, 64 * KiB, "imx95.usb-ctrl" },
     [FSL_IMX95_USDHC1] = { 0x42850000, 64 * KiB, "imx95.usdhc1" },
     [FSL_IMX95_USDHC2] = { 0x42860000, 64 * KiB, "imx95.usdhc2" },
-    [FSL_IMX95_USDHC3] = { 0x42870000, 64 * KiB, "imx95.usdhc3" },
+    [FSL_IMX95_USDHC3] = { 0x428B0000, 64 * KiB, "imx95.usdhc3" },
     [FSL_IMX95_V2X_DBG_MU] = { 0x47350000, 64 * KiB, "imx95.v2x-dbg-mu" },
     [FSL_IMX95_V2X_MU0] = { 0x47300000, 64 * KiB, "imx95.v2x-mu0" },
     [FSL_IMX95_V2X_MU3] = { 0x47330000, 64 * KiB, "imx95.v2x-mu3" },
@@ -157,6 +182,200 @@ static const struct {
     [FSL_IMX95_WDOG5] = { 0x424a0000, 64 * KiB, "imx95.wdog5" },
 };
 
+typedef struct FslImx95SimpleDeviceConfig {
+    unsigned int region;
+    int irq;
+    int mmio_priority;
+} FslImx95SimpleDeviceConfig;
+
+#define FSL_IMX95_NO_IRQ (-1)
+#define FSL_IMX95_NO_OVERLAP (-1)
+
+static const FslImx95SimpleDeviceConfig fsl_imx95_gpio_cfg[] = {
+    { FSL_IMX95_GPIO1, FSL_IMX95_NO_IRQ, FSL_IMX95_NO_OVERLAP },
+    { FSL_IMX95_GPIO2, FSL_IMX95_NO_IRQ, FSL_IMX95_NO_OVERLAP },
+    { FSL_IMX95_GPIO3, FSL_IMX95_NO_IRQ, FSL_IMX95_NO_OVERLAP },
+    { FSL_IMX95_GPIO4, FSL_IMX95_NO_IRQ, FSL_IMX95_NO_OVERLAP },
+    { FSL_IMX95_GPIO5, FSL_IMX95_NO_IRQ, FSL_IMX95_NO_OVERLAP },
+};
+
+static const FslImx95SimpleDeviceConfig fsl_imx95_wdog_cfg[] = {
+    { FSL_IMX95_WDOG1, FSL_IMX95_NO_IRQ, FSL_IMX95_NO_OVERLAP },
+    { FSL_IMX95_WDOG2, FSL_IMX95_NO_IRQ, FSL_IMX95_NO_OVERLAP },
+    { FSL_IMX95_WDOG4, FSL_IMX95_NO_IRQ, FSL_IMX95_NO_OVERLAP },
+    { FSL_IMX95_WDOG5, FSL_IMX95_NO_IRQ, FSL_IMX95_NO_OVERLAP },
+};
+
+typedef struct FslImx95MuConfig {
+    unsigned int a_region;
+    unsigned int b_region;
+    unsigned int sram_a_region;
+    unsigned int sram_b_region;
+    unsigned int mua_irq;
+    unsigned int mub_irq;
+} FslImx95MuConfig;
+
+typedef struct FslImx95LpuartConfig {
+    unsigned int region;
+    unsigned int serial;
+    unsigned int irq;
+    bool to_gic;
+} FslImx95LpuartConfig;
+
+typedef struct FslImx95EdmaConfig {
+    unsigned int region;
+    unsigned int version;
+    unsigned int channels;
+    unsigned int requests;
+    unsigned int irq_lines;
+    unsigned int irq_base;
+    unsigned int err_irq;
+} FslImx95EdmaConfig;
+
+typedef struct FslImx95Lpi2cConfig {
+    unsigned int region;
+    unsigned int irq;
+    unsigned int edma;
+    unsigned int tx_request;
+    unsigned int rx_request;
+} FslImx95Lpi2cConfig;
+
+typedef struct FslImx95UsdhcConfig {
+    unsigned int region;
+    unsigned int irq;
+} FslImx95UsdhcConfig;
+
+typedef struct FslImx95PcieConfig {
+    unsigned int dbi_region;
+    unsigned int atu_region;
+    unsigned int inta_irq;
+    unsigned int msi_irq;
+} FslImx95PcieConfig;
+
+static const FslImx95MuConfig fsl_imx95_aon_mu_cfg[] = {
+    {
+        FSL_IMX95_AON_MU1_A, FSL_IMX95_AON_MU1_B,
+        FSL_IMX95_AON_MU1_SRAM_A, FSL_IMX95_AON_MU1_SRAM_B,
+        FSL_IMX95_AON_MU1_MUA_IRQ, FSL_IMX95_AON_MU1_MUB_M33_IRQ,
+    }, {
+        FSL_IMX95_AON_MU2_A, FSL_IMX95_AON_MU2_B,
+        FSL_IMX95_AON_MU2_SRAM_A, FSL_IMX95_AON_MU2_SRAM_B,
+        FSL_IMX95_AON_MU2_MUA_IRQ, FSL_IMX95_AON_MU2_MUB_M33_IRQ,
+    },
+};
+
+static const FslImx95LpuartConfig fsl_imx95_lpuart_cfg[] = {
+    { FSL_IMX95_LPUART_SM, 0, FSL_IMX95_LPUART_SM_IRQ, false },
+    { FSL_IMX95_LPUART_A55, 1, FSL_IMX95_LPUART_A55_IRQ, true },
+};
+
+static const FslImx95EdmaConfig fsl_imx95_edma_cfg[] = {
+    [FSL_IMX95_EDMA_AON] = {
+        FSL_IMX95_EDMA1, IMX_EDMA_V3, 32, 32, 31,
+        FSL_IMX95_EDMA_AON_IRQ, FSL_IMX95_EDMA_AON_ERR_IRQ,
+    },
+    [FSL_IMX95_EDMA_WAKEUP2] = {
+        FSL_IMX95_EDMA2, IMX_EDMA_V5, 64, 128, 32,
+        FSL_IMX95_EDMA_WAKEUP2_IRQ, FSL_IMX95_EDMA_WAKEUP2_ERR_IRQ,
+    },
+    [FSL_IMX95_EDMA_WAKEUP3] = {
+        FSL_IMX95_EDMA3, IMX_EDMA_V5, 64, 128, 32,
+        FSL_IMX95_EDMA_WAKEUP3_IRQ, FSL_IMX95_EDMA_WAKEUP3_ERR_IRQ,
+    },
+};
+
+static const FslImx95Lpi2cConfig fsl_imx95_lpi2c_cfg[] = {
+    {
+        FSL_IMX95_LPI2C1, FSL_IMX95_LPI2C1_IRQ, FSL_IMX95_EDMA_AON,
+        FSL_IMX95_DMAREQ_LPI2C1_TX, FSL_IMX95_DMAREQ_LPI2C1_RX,
+    }, {
+        FSL_IMX95_LPI2C2, FSL_IMX95_LPI2C2_IRQ, FSL_IMX95_EDMA_AON,
+        FSL_IMX95_DMAREQ_LPI2C2_TX, FSL_IMX95_DMAREQ_LPI2C2_RX,
+    }, {
+        FSL_IMX95_LPI2C3, FSL_IMX95_LPI2C3_IRQ, FSL_IMX95_EDMA_WAKEUP2,
+        FSL_IMX95_DMAREQ_LPI2C3_TX, FSL_IMX95_DMAREQ_LPI2C3_RX,
+    }, {
+        FSL_IMX95_LPI2C4, FSL_IMX95_LPI2C4_IRQ, FSL_IMX95_EDMA_WAKEUP2,
+        FSL_IMX95_DMAREQ_LPI2C4_TX, FSL_IMX95_DMAREQ_LPI2C4_RX,
+    }, {
+        FSL_IMX95_LPI2C5, FSL_IMX95_LPI2C5_IRQ, FSL_IMX95_EDMA_WAKEUP2,
+        FSL_IMX95_DMAREQ_LPI2C5_TX, FSL_IMX95_DMAREQ_LPI2C5_RX,
+    }, {
+        FSL_IMX95_LPI2C6, FSL_IMX95_LPI2C6_IRQ, FSL_IMX95_EDMA_WAKEUP2,
+        FSL_IMX95_DMAREQ_LPI2C6_TX, FSL_IMX95_DMAREQ_LPI2C6_RX,
+    }, {
+        FSL_IMX95_LPI2C7, FSL_IMX95_LPI2C7_IRQ, FSL_IMX95_EDMA_WAKEUP2,
+        FSL_IMX95_DMAREQ_LPI2C7_TX, FSL_IMX95_DMAREQ_LPI2C7_RX,
+    }, {
+        FSL_IMX95_LPI2C8, FSL_IMX95_LPI2C8_IRQ, FSL_IMX95_EDMA_WAKEUP2,
+        FSL_IMX95_DMAREQ_LPI2C8_TX, FSL_IMX95_DMAREQ_LPI2C8_RX,
+    },
+};
+
+static const FslImx95UsdhcConfig fsl_imx95_usdhc_cfg[] = {
+    { FSL_IMX95_USDHC1, FSL_IMX95_USDHC1_IRQ },
+    { FSL_IMX95_USDHC2, FSL_IMX95_USDHC2_IRQ },
+    { FSL_IMX95_USDHC3, FSL_IMX95_USDHC3_IRQ },
+};
+
+static const FslImx95PcieConfig fsl_imx95_pcie_cfg[] = {
+    {
+        FSL_IMX95_PCIE0, FSL_IMX95_PCIE0_ATU,
+        FSL_IMX95_PCIE0_INTA_IRQ, FSL_IMX95_PCIE0_MSI_IRQ,
+    }, {
+        FSL_IMX95_PCIE1, FSL_IMX95_PCIE1_ATU,
+        FSL_IMX95_PCIE1_INTA_IRQ, FSL_IMX95_PCIE1_MSI_IRQ,
+    },
+};
+
+static const unsigned int fsl_imx95_serdes_region[] = {
+    FSL_IMX95_PCIE0_APP,
+    FSL_IMX95_PCIE1_APP,
+};
+
+static const unsigned int fsl_imx95_netc_ecam_region[] = {
+    FSL_IMX95_NETC_ECAM0,
+    FSL_IMX95_NETC_ECAM1,
+};
+
+QEMU_BUILD_BUG_ON(ARRAY_SIZE(fsl_imx95_aon_mu_cfg) !=
+                  FSL_IMX95_NUM_AON_MUS);
+QEMU_BUILD_BUG_ON(ARRAY_SIZE(fsl_imx95_lpuart_cfg) !=
+                  FSL_IMX95_NUM_LPUARTS);
+QEMU_BUILD_BUG_ON(ARRAY_SIZE(fsl_imx95_edma_cfg) != FSL_IMX95_NUM_EDMAS);
+QEMU_BUILD_BUG_ON(ARRAY_SIZE(fsl_imx95_lpi2c_cfg) != FSL_IMX95_NUM_LPI2CS);
+QEMU_BUILD_BUG_ON(ARRAY_SIZE(fsl_imx95_usdhc_cfg) != FSL_IMX95_NUM_USDHCS);
+QEMU_BUILD_BUG_ON(ARRAY_SIZE(fsl_imx95_pcie_cfg) !=
+                  FSL_IMX95_NUM_PCIES);
+QEMU_BUILD_BUG_ON(ARRAY_SIZE(fsl_imx95_serdes_region) !=
+                  FSL_IMX95_NUM_PCIES);
+QEMU_BUILD_BUG_ON(ARRAY_SIZE(fsl_imx95_netc_ecam_region) !=
+                  FSL_IMX95_NUM_PCIES);
+
+static bool fsl_imx95_realize_simple_device(SysBusDevice *sbd,
+                                            const FslImx95SimpleDeviceConfig *cfg,
+                                            DeviceState *intc,
+                                            Error **errp)
+{
+    if (!sysbus_realize(sbd, errp)) {
+        return false;
+    }
+
+    if (cfg->mmio_priority == FSL_IMX95_NO_OVERLAP) {
+        sysbus_mmio_map(sbd, 0, fsl_imx95_memmap[cfg->region].addr);
+    } else {
+        sysbus_mmio_map_overlap(sbd, 0,
+                                fsl_imx95_memmap[cfg->region].addr,
+                                cfg->mmio_priority);
+    }
+
+    if (cfg->irq != FSL_IMX95_NO_IRQ) {
+        sysbus_connect_irq(sbd, 0, qdev_get_gpio_in(intc, cfg->irq));
+    }
+
+    return true;
+}
+
 static void fsl_imx95_init(Object *obj)
 {
     FslImx95State *s = FSL_IMX95(obj);
@@ -164,9 +383,21 @@ static void fsl_imx95_init(Object *obj)
 
     object_initialize_child(obj, "a55-cluster", &s->a55_cluster,
                             TYPE_CPU_CLUSTER);
+    for (i = 0; i < FSL_IMX95_NUM_CPUS; i++) {
+        g_autofree char *name = g_strdup_printf("cpu%d", i);
+
+        object_initialize_child(OBJECT(&s->a55_cluster), name, &s->cpu[i],
+                                ARM_CPU_TYPE_NAME("cortex-a55"));
+    }
     object_initialize_child(obj, "gic", &s->gic, gicv3_class_name());
+    object_initialize_child(obj, "gic-its", &s->its, its_class_name());
     object_initialize_child(obj, "m33", &s->m33, TYPE_ARMV7M);
     object_initialize_child(obj, "m7", &s->m7, TYPE_ARMV7M);
+
+    s->m33_cpuclk = clock_new(obj, "m33-cpuclk");
+    s->m33_refclk = clock_new(obj, "m33-refclk");
+    s->m7_cpuclk = clock_new(obj, "m7-cpuclk");
+    s->m7_refclk = clock_new(obj, "m7-refclk");
     object_initialize_child(obj, "m7-lpuart", &s->m7_lpuart, TYPE_IMX_LPUART);
 
     for (i = 0; i < ARRAY_SIZE(s->aon_mu); i++) {
@@ -200,15 +431,21 @@ static void fsl_imx95_init(Object *obj)
     object_initialize_child(obj, "usb2", &s->usb2, TYPE_CHIPIDEA);
     object_initialize_child(obj, "ccm", &s->ccm, TYPE_IMX95_CCM);
     object_initialize_child(obj, "sysctr", &s->sysctr, TYPE_IMX95_SYSCTR);
-    for (i = 0; i < 2; i++) {
-        g_autofree char *nm = g_strdup_printf("pcie-serdes%d", i);
-        object_initialize_child(obj, nm, &s->pcie_serdes[i], TYPE_IMX95_PCIE_SERDES_SS);
-        g_free(nm); nm = g_strdup_printf("netc-ecam%d", i);
-        object_initialize_child(obj, nm, &s->netc_ecam[i], TYPE_IMX95_NETC_ECAM);
+    for (i = 0; i < ARRAY_SIZE(s->pcie_serdes); i++) {
+        g_autofree char *serdes_name = g_strdup_printf("pcie-serdes%d", i);
+        g_autofree char *ecam_name = g_strdup_printf("netc-ecam%d", i);
+
+        object_initialize_child(obj, serdes_name, &s->pcie_serdes[i],
+                                TYPE_IMX95_PCIE_SERDES_SS);
+        object_initialize_child(obj, ecam_name, &s->netc_ecam[i],
+                                TYPE_IMX95_NETC_ECAM);
     }
-    object_initialize_child(obj, "hsio-blk-ctrl", &s->hsio_blk_ctrl, TYPE_IMX95_HSIO_BLK_CTRL);
-    object_initialize_child(obj, "camera-csr", &s->camera_csr, TYPE_IMX95_CAMERA_CSR);
-    object_initialize_child(obj, "camera-noc", &s->camera_noc, TYPE_IMX95_CAMERA_NOC);
+    object_initialize_child(obj, "hsio-blk-ctrl", &s->hsio_blk_ctrl,
+                            TYPE_IMX95_HSIO_BLK_CTRL);
+    object_initialize_child(obj, "camera-csr", &s->camera_csr,
+                            TYPE_IMX95_CAMERA_CSR);
+    object_initialize_child(obj, "camera-noc", &s->camera_noc,
+                            TYPE_IMX95_CAMERA_NOC);
     object_initialize_child(obj, "bbnsm", &s->bbnsm, TYPE_IMX95_BBNSM);
     object_initialize_child(obj, "fractpll", &s->fractpll, TYPE_IMX95_FRACTPLL);
     object_initialize_child(obj, "a55-tmpsns", &s->tmpsns, TYPE_IMX95_TMPSNS);
@@ -246,11 +483,6 @@ static void fsl_imx95_init(Object *obj)
     }
 }
 
-static void fsl_imx95_a55_reset(void *opaque)
-{
-    cpu_reset(CPU(opaque));
-}
-
 static void fsl_imx95_m7_start_work(CPUState *cs, run_on_cpu_data data)
 {
     ARMCPU *cpu = ARM_CPU(cs);
@@ -269,14 +501,15 @@ static void fsl_imx95_m7_stop_work(CPUState *cs, run_on_cpu_data data)
     cs->exception_index = EXCP_HLT;
 }
 
+/* Run level from the AONMIX: start the M7 at INITVTOR, or hold it */
 static void fsl_imx95_m7_run_in(void *opaque, int n, int level)
 {
     FslImx95State *s = opaque;
     CPUState *cs = CPU(s->m7.cpu);
 
     if (level) {
-        uint32_t vtor = object_property_get_uint(OBJECT(&s->blk_ctrl_aonmix),
-                                                 "m7-initvtor", &error_abort);
+        uint32_t vtor = imx95_blk_ctrl_s_aonmix_get_m7_initvtor(
+            &s->blk_ctrl_aonmix);
 
         async_run_on_cpu(cs, fsl_imx95_m7_start_work,
                          RUN_ON_CPU_HOST_INT(vtor));
@@ -291,13 +524,16 @@ static void fsl_imx95_m7_run_in(void *opaque, int n, int level)
 #define FSL_IMX95_M7_DTCM_SIZE      (256 * KiB)
 #define FSL_IMX95_M7_DTCM_BASE      0x20000000
 #define FSL_IMX95_M7_NUM_IRQS       240
+#define FSL_IMX95_SMMU_PMCG0_BASE   0x490d2000
+#define FSL_IMX95_SMMU_PMCG1_BASE   0x49112000
+#define FSL_IMX95_SMMU_PMCG_STRIDE  0x00020000
 
-static void fsl_imx95_realize(DeviceState *dev, Error **errp)
+static bool fsl_imx95_realize_core(FslImx95State *s, DeviceState *dev,
+                                    MemoryRegion *sysmem,
+                                    DeviceState *gicdev,
+                                    DeviceState *m33dev,
+                                    Error **errp)
 {
-    FslImx95State *s = FSL_IMX95(dev);
-    MemoryRegion *sysmem = get_system_memory();
-    DeviceState *gicdev = DEVICE(&s->gic);
-    DeviceState *m33dev = DEVICE(&s->m33);
     int i;
 
     /* On-chip memories */
@@ -305,7 +541,7 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
                                 fsl_imx95_memmap[FSL_IMX95_M33_CODE_TCM].name,
                                 fsl_imx95_memmap[FSL_IMX95_M33_CODE_TCM].size,
                                 errp)) {
-        return;
+        return false;
     }
     memory_region_add_subregion(sysmem,
                                 fsl_imx95_memmap[FSL_IMX95_M33_CODE_TCM].addr,
@@ -315,7 +551,7 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
                                 fsl_imx95_memmap[FSL_IMX95_M33_DATA_TCM].name,
                                 fsl_imx95_memmap[FSL_IMX95_M33_DATA_TCM].size,
                                 errp)) {
-        return;
+        return false;
     }
     memory_region_add_subregion(sysmem,
                                 fsl_imx95_memmap[FSL_IMX95_M33_DATA_TCM].addr,
@@ -325,7 +561,7 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
                                 FSL_IMX95_M7_ITCM_SIZE, errp) ||
         !memory_region_init_ram(&s->m7_dtcm, OBJECT(dev), "imx95.m7.dtcm",
                                 FSL_IMX95_M7_DTCM_SIZE, errp)) {
-        return;
+        return false;
     }
     memory_region_add_subregion(sysmem, FSL_IMX95_M7_TCM_SYS_ADDR,
                                 &s->m7_itcm);
@@ -349,7 +585,7 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
                                 fsl_imx95_memmap[FSL_IMX95_A55_OCRAM].name,
                                 fsl_imx95_memmap[FSL_IMX95_A55_OCRAM].size,
                                 errp)) {
-        return;
+        return false;
     }
     memory_region_add_subregion(sysmem,
                                 fsl_imx95_memmap[FSL_IMX95_A55_OCRAM].addr,
@@ -359,14 +595,14 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
                                 fsl_imx95_memmap[FSL_IMX95_DDRMIX].name,
                                 fsl_imx95_memmap[FSL_IMX95_DDRMIX].size,
                                 errp)) {
-        return;
+        return false;
     }
     memory_region_add_subregion(sysmem,
                                 fsl_imx95_memmap[FSL_IMX95_DDRMIX].addr,
                                 &s->ddrmix);
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->sc_mu), errp)) {
-        return;
+        return false;
     }
     sysbus_mmio_map_overlap(SYS_BUS_DEVICE(&s->sc_mu), 0,
                             fsl_imx95_memmap[FSL_IMX95_SC_MU].addr, 1);
@@ -374,28 +610,34 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
     /* Cortex-A55 cores */
     qdev_prop_set_uint32(DEVICE(&s->a55_cluster), "cluster-id", 0);
     for (i = 0; i < FSL_IMX95_NUM_CPUS; i++) {
-        g_autofree char *name = g_strdup_printf("cpu%d", i);
         uint64_t affinity = (uint64_t)i << 8;
 
-        object_initialize_child(OBJECT(&s->a55_cluster), name, &s->cpu[i],
-                                ARM_CPU_TYPE_NAME("cortex-a55"));
-
+        /* MT set: Aff1 is the core, Aff0 the lowest level */
         s->cpu[i].mpidr_mt = true;
         object_property_set_uint(OBJECT(&s->cpu[i]), "mp-affinity", affinity,
-                                 &error_abort);
+                                 errp);
+        if (*errp) {
+            return false;
+        }
         object_property_set_uint(OBJECT(&s->cpu[i]), "cntfrq", 24000000,
-                                 &error_abort);
+                                 errp);
+        if (*errp) {
+            return false;
+        }
         object_property_set_bool(OBJECT(&s->cpu[i]), "start-powered-off",
-                                 true, &error_abort);
+                                 true, errp);
+        if (*errp) {
+            return false;
+        }
 
         if (!qdev_realize(DEVICE(&s->cpu[i]), NULL, errp)) {
-            return;
+            return false;
         }
-        qemu_register_reset(fsl_imx95_a55_reset, &s->cpu[i]);
+        qemu_register_resettable(OBJECT(&s->cpu[i]));
     }
 
     if (!qdev_realize(DEVICE(&s->a55_cluster), NULL, errp)) {
-        return;
+        return false;
     }
 
     /* GIC */
@@ -408,27 +650,30 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
         qdev_prop_set_uint32(gicdev, "num-irq",
                              FSL_IMX95_NUM_IRQS + GIC_INTERNAL);
         qdev_prop_set_bit(gicdev, "has-security-extensions", true);
-        /* The ITS delivers MSIs as LPIs (GIC-700, RM 119.2.6) */
         qdev_prop_set_bit(gicdev, "has-lpi", true);
         redist_region_count = qlist_new();
         qlist_append_int(redist_region_count, FSL_IMX95_NUM_CPUS);
         qdev_prop_set_array(gicdev, "redist-region-count",
                             redist_region_count);
         object_property_set_link(OBJECT(&s->gic), "sysmem", OBJECT(sysmem),
-                                 &error_abort);
+                                 errp);
+        if (*errp) {
+            return false;
+        }
         if (!sysbus_realize(gicsbd, errp)) {
-            return;
+            return false;
         }
         sysbus_mmio_map(gicsbd, 0, fsl_imx95_memmap[FSL_IMX95_GIC_DIST].addr);
         sysbus_mmio_map(gicsbd, 1,
                         fsl_imx95_memmap[FSL_IMX95_GIC_REDIST].addr);
 
-        object_initialize_child(OBJECT(s), "gic-its", &s->its,
-                                its_class_name());
         object_property_set_link(OBJECT(&s->its), "parent-gicv3",
-                                 OBJECT(&s->gic), &error_abort);
+                                 OBJECT(&s->gic), errp);
+        if (*errp) {
+            return false;
+        }
         if (!sysbus_realize(SYS_BUS_DEVICE(&s->its), errp)) {
-            return;
+            return false;
         }
         sysbus_mmio_map(SYS_BUS_DEVICE(&s->its), 0,
                         fsl_imx95_memmap[FSL_IMX95_GIC_ITS].addr);
@@ -469,25 +714,27 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
         }
     }
 
-    s->m33_cpuclk = clock_new(OBJECT(dev), "m33-cpuclk");
-    s->m33_refclk = clock_new(OBJECT(dev), "m33-refclk");
     clock_set_hz(s->m33_cpuclk, 24 * 1000 * 1000);
     clock_set_hz(s->m33_refclk, 24 * 1000 * 1000);
     qdev_connect_clock_in(m33dev, "cpuclk", s->m33_cpuclk);
     qdev_connect_clock_in(m33dev, "refclk", s->m33_refclk);
     object_property_set_link(OBJECT(&s->m33), "memory", OBJECT(sysmem),
-                             &error_abort);
+                             errp);
+    if (*errp) {
+        return false;
+    }
     qdev_prop_set_string(m33dev, "cpu-type", ARM_CPU_TYPE_NAME("cortex-m33"));
     qdev_prop_set_uint32(m33dev, "num-irq", FSL_IMX95_M33_NUM_IRQS);
     qdev_prop_set_uint32(m33dev, "init-svtor",
                          fsl_imx95_memmap[FSL_IMX95_M33_CODE_TCM].addr);
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->m33), errp)) {
-        return;
+        return false;
     }
     g_assert(s->m33.cpu != NULL);
     CPU(s->m33.cpu)->cluster_index = 1;
     armv7m_load_kernel(s->m33.cpu, NULL, 0, 0);
 
+    /* M7 view: system map, with ITCM and DTCM overlaid on top */
     memory_region_init(&s->m7_view, OBJECT(dev), "imx95.m7-view", 4 * GiB);
     memory_region_init_alias(&s->m7_sys_alias, OBJECT(dev), "imx95.m7-sys",
                              sysmem, 0, 4 * GiB);
@@ -500,14 +747,15 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
     memory_region_add_subregion_overlap(&s->m7_view, FSL_IMX95_M7_DTCM_BASE,
                                         &s->m7_dtcm_alias, 1);
 
-    s->m7_cpuclk = clock_new(OBJECT(dev), "m7-cpuclk");
-    s->m7_refclk = clock_new(OBJECT(dev), "m7-refclk");
     clock_set_hz(s->m7_cpuclk, 24 * 1000 * 1000);
     clock_set_hz(s->m7_refclk, 24 * 1000 * 1000);
     qdev_connect_clock_in(DEVICE(&s->m7), "cpuclk", s->m7_cpuclk);
     qdev_connect_clock_in(DEVICE(&s->m7), "refclk", s->m7_refclk);
     object_property_set_link(OBJECT(&s->m7), "memory", OBJECT(&s->m7_view),
-                             &error_abort);
+                             errp);
+    if (*errp) {
+        return false;
+    }
     qdev_prop_set_string(DEVICE(&s->m7), "cpu-type",
                          ARM_CPU_TYPE_NAME("cortex-m7"));
     qdev_prop_set_uint32(DEVICE(&s->m7), "num-irq", FSL_IMX95_M7_NUM_IRQS);
@@ -515,7 +763,7 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
     qdev_prop_set_uint32(DEVICE(&s->m7), "mpu-ns-regions", 16);
     qdev_prop_set_uint32(DEVICE(&s->m7), "mpu-s-regions", 16);
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->m7), errp)) {
-        return;
+        return false;
     }
     g_assert(s->m7.cpu != NULL);
     CPU(s->m7.cpu)->cluster_index = 2;
@@ -532,61 +780,64 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
             qdev_prop_set_chr(DEVICE(&s->m7_lpuart), "chardev", chr);
         }
         if (!sysbus_realize(sbd, errp)) {
-            return;
+            return false;
         }
         sysbus_mmio_map(sbd, 0, fsl_imx95_memmap[FSL_IMX95_LPUART_M7].addr);
         sysbus_connect_irq(sbd, 0, qdev_get_gpio_in(DEVICE(&s->m7),
                                                     FSL_IMX95_LPUART_M7_IRQ));
     }
 
+    return true;
+}
+
+static bool fsl_imx95_realize_communication(FslImx95State *s,
+                                             DeviceState *dev,
+                                             MemoryRegion *sysmem,
+                                             DeviceState *gicdev,
+                                             DeviceState *m33dev,
+                                             Error **errp)
+{
+    int i;
+
     /* AON message units (A side -> GIC, B side -> M33 NVIC) */
     for (i = 0; i < ARRAY_SIZE(s->aon_mu); i++) {
-        static const struct {
-            int a, b, sram_a, sram_b;
-            unsigned int mua_irq, mub_irq;
-        } mu_table[ARRAY_SIZE(s->aon_mu)] = {
-            { FSL_IMX95_AON_MU1_A, FSL_IMX95_AON_MU1_B,
-              FSL_IMX95_AON_MU1_SRAM_A, FSL_IMX95_AON_MU1_SRAM_B,
-              FSL_IMX95_AON_MU1_MUA_IRQ, FSL_IMX95_AON_MU1_MUB_M33_IRQ },
-            { FSL_IMX95_AON_MU2_A, FSL_IMX95_AON_MU2_B,
-              FSL_IMX95_AON_MU2_SRAM_A, FSL_IMX95_AON_MU2_SRAM_B,
-              FSL_IMX95_AON_MU2_MUA_IRQ, FSL_IMX95_AON_MU2_MUB_M33_IRQ },
-        };
         SysBusDevice *mu = SYS_BUS_DEVICE(&s->aon_mu[i]);
+        qdev_prop_set_uint32(DEVICE(&s->aon_mu[i]),
+                              "gier0-reset", BIT(0));
+        qdev_prop_set_uint32(DEVICE(&s->aon_mu[i]),
+                              "gier1-reset", BIT(0));
 
         if (!memory_region_init_ram(&s->aon_mu_sram[i], OBJECT(dev),
-                                    fsl_imx95_memmap[mu_table[i].sram_a].name,
-                                    fsl_imx95_memmap[mu_table[i].sram_a].size,
+                                    fsl_imx95_memmap[fsl_imx95_aon_mu_cfg[i].sram_a_region].name,
+                                    fsl_imx95_memmap[fsl_imx95_aon_mu_cfg[i].sram_a_region].size,
                                     errp)) {
-            return;
+            return false;
         }
         memory_region_add_subregion(sysmem,
-                                    fsl_imx95_memmap[mu_table[i].sram_a].addr,
+                                    fsl_imx95_memmap[fsl_imx95_aon_mu_cfg[i].sram_a_region].addr,
                                     &s->aon_mu_sram[i]);
         memory_region_init_alias(&s->aon_mu_sram_b_alias[i], OBJECT(dev),
-                                 fsl_imx95_memmap[mu_table[i].sram_b].name,
+                                 fsl_imx95_memmap[fsl_imx95_aon_mu_cfg[i].sram_b_region].name,
                                  &s->aon_mu_sram[i], 0,
-                                 fsl_imx95_memmap[mu_table[i].sram_b].size);
+                                 fsl_imx95_memmap[fsl_imx95_aon_mu_cfg[i].sram_b_region].size);
         memory_region_add_subregion(sysmem,
-                                    fsl_imx95_memmap[mu_table[i].sram_b].addr,
+                                    fsl_imx95_memmap[fsl_imx95_aon_mu_cfg[i].sram_b_region].addr,
                                     &s->aon_mu_sram_b_alias[i]);
 
         if (!sysbus_realize(mu, errp)) {
-            return;
+            return false;
         }
-        sysbus_mmio_map(mu, 0, fsl_imx95_memmap[mu_table[i].a].addr);
-        sysbus_mmio_map(mu, 1, fsl_imx95_memmap[mu_table[i].b].addr);
-        sysbus_connect_irq(mu, 0, qdev_get_gpio_in(gicdev, mu_table[i].mua_irq));
-        sysbus_connect_irq(mu, 1, qdev_get_gpio_in(m33dev, mu_table[i].mub_irq));
-        s->aon_mu[i].gier[0] = BIT(0);
-        s->aon_mu[i].gier[1] = BIT(0);
+        sysbus_mmio_map(mu, 0, fsl_imx95_memmap[fsl_imx95_aon_mu_cfg[i].a_region].addr);
+        sysbus_mmio_map(mu, 1, fsl_imx95_memmap[fsl_imx95_aon_mu_cfg[i].b_region].addr);
+        sysbus_connect_irq(mu, 0, qdev_get_gpio_in(gicdev, fsl_imx95_aon_mu_cfg[i].mua_irq));
+        sysbus_connect_irq(mu, 1, qdev_get_gpio_in(m33dev, fsl_imx95_aon_mu_cfg[i].mub_irq));
     }
 
     if (!memory_region_init_ram(&s->m7_mu_sram, OBJECT(dev),
                                 fsl_imx95_memmap[FSL_IMX95_AON_MU5_SRAM_A].name,
                                 fsl_imx95_memmap[FSL_IMX95_AON_MU5_SRAM_A].size,
                                 errp)) {
-        return;
+        return false;
     }
     memory_region_add_subregion(sysmem,
                                 fsl_imx95_memmap[FSL_IMX95_AON_MU5_SRAM_A].addr,
@@ -598,8 +849,10 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
     memory_region_add_subregion(sysmem,
                                 fsl_imx95_memmap[FSL_IMX95_AON_MU5_SRAM_B].addr,
                                 &s->m7_mu_sram_b_alias);
+    qdev_prop_set_uint32(DEVICE(&s->m7_mu), "gier0-reset", BIT(0));
+    qdev_prop_set_uint32(DEVICE(&s->m7_mu), "gier1-reset", BIT(0));
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->m7_mu), errp)) {
-        return;
+        return false;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->m7_mu), 0,
                     fsl_imx95_memmap[FSL_IMX95_AON_MU5_A].addr);
@@ -611,11 +864,9 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->m7_mu), 1,
                        qdev_get_gpio_in(m33dev,
                                         FSL_IMX95_AON_MU5_MUB_M33_IRQ));
-    s->m7_mu.gier[0] = BIT(0);
-    s->m7_mu.gier[1] = BIT(0);
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->wakeup_mu), errp)) {
-        return;
+        return false;
     }
 
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->wakeup_mu), 0,
@@ -629,28 +880,19 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
                                         FSL_IMX95_WAKEUP_MU7_MUB_M7_IRQ));
 
     for (i = 0; i < FSL_IMX95_NUM_LPUARTS; i++) {
-        static const struct {
-            int region;
-            unsigned int serial;
-            unsigned int irq;
-            bool to_gic;
-        } lpuart_table[FSL_IMX95_NUM_LPUARTS] = {
-            { FSL_IMX95_LPUART_SM,  0, FSL_IMX95_LPUART_SM_IRQ,  false },
-            { FSL_IMX95_LPUART_A55, 1, FSL_IMX95_LPUART_A55_IRQ, true },
-        };
-        Chardev *chr = serial_hd(lpuart_table[i].serial);
+        Chardev *chr = serial_hd(fsl_imx95_lpuart_cfg[i].serial);
         SysBusDevice *sbd = SYS_BUS_DEVICE(&s->lpuart[i]);
 
         if (chr) {
             qdev_prop_set_chr(DEVICE(&s->lpuart[i]), "chardev", chr);
         }
         if (!sysbus_realize(sbd, errp)) {
-            return;
+            return false;
         }
-        sysbus_mmio_map(sbd, 0, fsl_imx95_memmap[lpuart_table[i].region].addr);
+        sysbus_mmio_map(sbd, 0, fsl_imx95_memmap[fsl_imx95_lpuart_cfg[i].region].addr);
         sysbus_connect_irq(sbd, 0,
-            qdev_get_gpio_in(lpuart_table[i].to_gic ? gicdev : m33dev,
-                             lpuart_table[i].irq));
+            qdev_get_gpio_in(fsl_imx95_lpuart_cfg[i].to_gic ? gicdev : m33dev,
+                             fsl_imx95_lpuart_cfg[i].irq));
     }
 
     {
@@ -666,121 +908,88 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
     }
 
     for (i = 0; i < ARRAY_SIZE(s->edma); i++) {
-        static const struct {
-            int region;
-            unsigned version;
-            unsigned channels;
-            unsigned requests;
-            unsigned irq_lines; 
-            unsigned irq_base;
-            unsigned err_irq;
-        } edma_table[FSL_IMX95_NUM_EDMAS] = {
-            [FSL_IMX95_EDMA_AON] = {
-                FSL_IMX95_EDMA1, IMX_EDMA_V3, 32, 32, 31,
-                FSL_IMX95_EDMA_AON_IRQ, FSL_IMX95_EDMA_AON_ERR_IRQ },
-            [FSL_IMX95_EDMA_WAKEUP2] = {
-                FSL_IMX95_EDMA2, IMX_EDMA_V5, 64, 128, 32,
-                FSL_IMX95_EDMA_WAKEUP2_IRQ, FSL_IMX95_EDMA_WAKEUP2_ERR_IRQ },
-            [FSL_IMX95_EDMA_WAKEUP3] = {
-                FSL_IMX95_EDMA3, IMX_EDMA_V5, 64, 128, 32,
-                FSL_IMX95_EDMA_WAKEUP3_IRQ, FSL_IMX95_EDMA_WAKEUP3_ERR_IRQ },
-        };
         SysBusDevice *sbd = SYS_BUS_DEVICE(&s->edma[i]);
         DeviceState *edev = DEVICE(&s->edma[i]);
-        bool v5 = edma_table[i].version == IMX_EDMA_V5;
+        bool v5 = fsl_imx95_edma_cfg[i].version == IMX_EDMA_V5;
 
-	/* The model has a line for each channel */
-        unsigned nlines = v5 ? edma_table[i].channels / 2 : edma_table[i].channels;
-        unsigned ch;
+        unsigned int ch;
+        unsigned int nlines = v5 ?
+            fsl_imx95_edma_cfg[i].channels / 2 :
+            fsl_imx95_edma_cfg[i].channels;
 
-        qdev_prop_set_uint32(edev, "version", edma_table[i].version);
-        qdev_prop_set_uint32(edev, "num-channels", edma_table[i].channels);
-        qdev_prop_set_uint32(edev, "num-requests", edma_table[i].requests);
+        /* 1 IRQ output for every channel or channel pair. */
+
+        qdev_prop_set_uint32(edev, "version", fsl_imx95_edma_cfg[i].version);
+        qdev_prop_set_uint32(edev, "num-channels", fsl_imx95_edma_cfg[i].channels);
+        qdev_prop_set_uint32(edev, "num-requests", fsl_imx95_edma_cfg[i].requests);
         qdev_prop_set_bit(edev, "paired-irqs", v5);
         object_property_set_link(OBJECT(edev), "dma", OBJECT(sysmem),
-                                 &error_abort);
-        if (!sysbus_realize(sbd, errp)) {
-            return;
+                                 errp);
+        if (*errp) {
+            return false;
         }
-        sysbus_mmio_map(sbd, 0, fsl_imx95_memmap[edma_table[i].region].addr);
-        for (ch = 0; ch < edma_table[i].irq_lines; ch++) {
+        if (!sysbus_realize(sbd, errp)) {
+            return false;
+        }
+        sysbus_mmio_map(sbd, 0, fsl_imx95_memmap[fsl_imx95_edma_cfg[i].region].addr);
+        for (ch = 0; ch < fsl_imx95_edma_cfg[i].irq_lines; ch++) {
             sysbus_connect_irq(sbd, ch,
-                qdev_get_gpio_in(gicdev, edma_table[i].irq_base + ch));
+                qdev_get_gpio_in(gicdev, fsl_imx95_edma_cfg[i].irq_base + ch));
         }
         sysbus_connect_irq(sbd, nlines,
-                           qdev_get_gpio_in(gicdev, edma_table[i].err_irq));
+                           qdev_get_gpio_in(gicdev, fsl_imx95_edma_cfg[i].err_irq));
     }
 
     for (i = 0; i < FSL_IMX95_NUM_LPI2CS; i++) {
-        static const struct {
-            int region;
-            unsigned int irq;
-            int edma;
-            unsigned int tx_req, rx_req;
-        } lpi2c_table[FSL_IMX95_NUM_LPI2CS] = {
-            { FSL_IMX95_LPI2C1, FSL_IMX95_LPI2C1_IRQ, FSL_IMX95_EDMA_AON,
-              FSL_IMX95_DMAREQ_LPI2C1_TX, FSL_IMX95_DMAREQ_LPI2C1_RX },
-            { FSL_IMX95_LPI2C2, FSL_IMX95_LPI2C2_IRQ, FSL_IMX95_EDMA_AON,
-              FSL_IMX95_DMAREQ_LPI2C2_TX, FSL_IMX95_DMAREQ_LPI2C2_RX },
-            { FSL_IMX95_LPI2C3, FSL_IMX95_LPI2C3_IRQ, FSL_IMX95_EDMA_WAKEUP2,
-              FSL_IMX95_DMAREQ_LPI2C3_TX, FSL_IMX95_DMAREQ_LPI2C3_RX },
-            { FSL_IMX95_LPI2C4, FSL_IMX95_LPI2C4_IRQ, FSL_IMX95_EDMA_WAKEUP2,
-              FSL_IMX95_DMAREQ_LPI2C4_TX, FSL_IMX95_DMAREQ_LPI2C4_RX },
-            { FSL_IMX95_LPI2C5, FSL_IMX95_LPI2C5_IRQ, FSL_IMX95_EDMA_WAKEUP2,
-              FSL_IMX95_DMAREQ_LPI2C5_TX, FSL_IMX95_DMAREQ_LPI2C5_RX },
-            { FSL_IMX95_LPI2C6, FSL_IMX95_LPI2C6_IRQ, FSL_IMX95_EDMA_WAKEUP2,
-              FSL_IMX95_DMAREQ_LPI2C6_TX, FSL_IMX95_DMAREQ_LPI2C6_RX },
-            { FSL_IMX95_LPI2C7, FSL_IMX95_LPI2C7_IRQ, FSL_IMX95_EDMA_WAKEUP2,
-              FSL_IMX95_DMAREQ_LPI2C7_TX, FSL_IMX95_DMAREQ_LPI2C7_RX },
-            { FSL_IMX95_LPI2C8, FSL_IMX95_LPI2C8_IRQ, FSL_IMX95_EDMA_WAKEUP2,
-              FSL_IMX95_DMAREQ_LPI2C8_TX, FSL_IMX95_DMAREQ_LPI2C8_RX },
-        };
         SysBusDevice *sbd = SYS_BUS_DEVICE(&s->lpi2c[i]);
 
         if (!sysbus_realize(sbd, errp)) {
-            return;
+            return false;
         }
-        sysbus_mmio_map(sbd, 0, fsl_imx95_memmap[lpi2c_table[i].region].addr);
+        sysbus_mmio_map(sbd, 0, fsl_imx95_memmap[fsl_imx95_lpi2c_cfg[i].region].addr);
         sysbus_connect_irq(sbd, 0,
-            qdev_get_gpio_in(i == 0 ? m33dev : gicdev, lpi2c_table[i].irq));
+            qdev_get_gpio_in(i == 0 ? m33dev : gicdev, fsl_imx95_lpi2c_cfg[i].irq));
         qdev_connect_gpio_out_named(DEVICE(sbd), "tx-dma-req", 0,
-            qdev_get_gpio_in_named(DEVICE(&s->edma[lpi2c_table[i].edma]),
-                                   "dma-req", lpi2c_table[i].tx_req));
+            qdev_get_gpio_in_named(DEVICE(&s->edma[fsl_imx95_lpi2c_cfg[i].edma]),
+                                   "dma-req", fsl_imx95_lpi2c_cfg[i].tx_request));
         qdev_connect_gpio_out_named(DEVICE(sbd), "rx-dma-req", 0,
-            qdev_get_gpio_in_named(DEVICE(&s->edma[lpi2c_table[i].edma]),
-                                   "dma-req", lpi2c_table[i].rx_req));
+            qdev_get_gpio_in_named(DEVICE(&s->edma[fsl_imx95_lpi2c_cfg[i].edma]),
+                                   "dma-req", fsl_imx95_lpi2c_cfg[i].rx_request));
     }
+
+    return true;
+}
+
+static bool fsl_imx95_realize_peripherals(FslImx95State *s,
+                                           DeviceState *dev,
+                                           MemoryRegion *sysmem,
+                                           DeviceState *gicdev,
+                                           Error **errp)
+{
+    int i;
 
     /* uSDHCs */
     for (i = 0; i < FSL_IMX95_NUM_USDHCS; i++) {
-        static const struct {
-            int region;
-            unsigned int irq;
-        } usdhc_table[FSL_IMX95_NUM_USDHCS] = {
-            { FSL_IMX95_USDHC1, FSL_IMX95_USDHC1_IRQ },
-            { FSL_IMX95_USDHC2, FSL_IMX95_USDHC2_IRQ },
-            { FSL_IMX95_USDHC3, FSL_IMX95_USDHC3_IRQ },
-        };
 
         if (!sysbus_realize(SYS_BUS_DEVICE(&s->usdhc[i]), errp)) {
-            return;
+            return false;
         }
         sysbus_mmio_map(SYS_BUS_DEVICE(&s->usdhc[i]), 0,
-                        fsl_imx95_memmap[usdhc_table[i].region].addr);
+                        fsl_imx95_memmap[fsl_imx95_usdhc_cfg[i].region].addr);
         sysbus_connect_irq(SYS_BUS_DEVICE(&s->usdhc[i]), 0,
-                           qdev_get_gpio_in(gicdev, usdhc_table[i].irq));
+                           qdev_get_gpio_in(gicdev, fsl_imx95_usdhc_cfg[i].irq));
     }
 
-    qdev_prop_set_uint32(DEVICE(&s->usb1.sysbus_xhci), "slots", 8);
+    qdev_prop_set_uint32(DEVICE(&s->usb1), "slots", 8);
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->usb1), errp)) {
-        return;
+        return false;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->usb1), 0,
                     fsl_imx95_memmap[FSL_IMX95_USB1].addr);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->usb1.sysbus_xhci), 0,
                        qdev_get_gpio_in(gicdev, FSL_IMX95_USB1_IRQ));
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->usb2), errp)) {
-        return;
+        return false;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->usb2), 0,
                     fsl_imx95_memmap[FSL_IMX95_USB2].addr);
@@ -788,15 +997,6 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
                        qdev_get_gpio_in(gicdev, FSL_IMX95_USB2_IRQ));
 
     {
-        static const struct {
-            int dbi, atu;
-            unsigned inta, msi;
-        } pcie_table[2] = {
-            { FSL_IMX95_PCIE0, FSL_IMX95_PCIE0_ATU,
-              FSL_IMX95_PCIE0_INTA_IRQ, FSL_IMX95_PCIE0_MSI_IRQ },
-            { FSL_IMX95_PCIE1, FSL_IMX95_PCIE1_ATU,
-              FSL_IMX95_PCIE1_INTA_IRQ, FSL_IMX95_PCIE1_MSI_IRQ },
-        };
         unsigned n;
 
         for (n = 0; n < ARRAY_SIZE(s->pcie); n++) {
@@ -806,77 +1006,57 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
             qdev_prop_set_string(DEVICE(sbd), "bus-name", bus);
             qdev_prop_set_uint32(DEVICE(sbd), "domain-nr", n);
             if (!sysbus_realize(sbd, errp)) {
-                return;
+                return false;
             }
-            sysbus_mmio_map(sbd, 0, fsl_imx95_memmap[pcie_table[n].dbi].addr);
-            sysbus_mmio_map(sbd, 1, fsl_imx95_memmap[pcie_table[n].atu].addr);
+            sysbus_mmio_map(sbd, 0, fsl_imx95_memmap[fsl_imx95_pcie_cfg[n].dbi_region].addr);
+            sysbus_mmio_map(sbd, 1, fsl_imx95_memmap[fsl_imx95_pcie_cfg[n].atu_region].addr);
             for (i = 0; i < 4; i++) {
                 sysbus_connect_irq(sbd, i,
-                    qdev_get_gpio_in(gicdev, pcie_table[n].inta + i));
+                    qdev_get_gpio_in(gicdev, fsl_imx95_pcie_cfg[n].inta_irq + i));
             }
             /* LTSSM_EN of the SerDes_SS starts training of this controller */
             qdev_connect_gpio_out_named(
                 DEVICE(&s->pcie_serdes[n]), "ltssm-en", 0,
                 qdev_get_gpio_in_named(DEVICE(sbd), "ltssm-en", 0));
             sysbus_connect_irq(sbd, 4,
-                qdev_get_gpio_in(gicdev, pcie_table[n].msi));
+                qdev_get_gpio_in(gicdev, fsl_imx95_pcie_cfg[n].msi_irq));
         }
     }
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->tpm[0]), errp)) {
-        return;
+        return false;
     }
     sysbus_mmio_map_overlap(SYS_BUS_DEVICE(&s->tpm[0]), 0,
                             fsl_imx95_memmap[FSL_IMX95_TPM3].addr, 1);
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->tpm[1]), errp)) {
-        return;
+        return false;
     }
     sysbus_mmio_map_overlap(SYS_BUS_DEVICE(&s->tpm[1]), 0,
                             fsl_imx95_memmap[FSL_IMX95_TPM6].addr, 1);
-    if (!sysbus_realize(SYS_BUS_DEVICE(&s->wdog[0]), errp)) {
-        return;
+    for (i = 0; i < ARRAY_SIZE(s->wdog); i++) {
+        if (!fsl_imx95_realize_simple_device(SYS_BUS_DEVICE(&s->wdog[i]),
+                                             &fsl_imx95_wdog_cfg[i],
+                                             gicdev, errp)) {
+            return false;
+        }
     }
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->wdog[0]), 0, fsl_imx95_memmap[FSL_IMX95_WDOG1].addr);
-    if (!sysbus_realize(SYS_BUS_DEVICE(&s->wdog[1]), errp)) {
-        return;
+
+    for (i = 0; i < ARRAY_SIZE(s->gpio); i++) {
+        if (!fsl_imx95_realize_simple_device(SYS_BUS_DEVICE(&s->gpio[i]),
+                                             &fsl_imx95_gpio_cfg[i],
+                                             gicdev, errp)) {
+            return false;
+        }
     }
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->wdog[1]), 0, fsl_imx95_memmap[FSL_IMX95_WDOG2].addr);
-    if (!sysbus_realize(SYS_BUS_DEVICE(&s->wdog[2]), errp)) {
-        return;
-    }
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->wdog[2]), 0, fsl_imx95_memmap[FSL_IMX95_WDOG4].addr);
-    if (!sysbus_realize(SYS_BUS_DEVICE(&s->wdog[3]), errp)) {
-        return;
-    }
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->wdog[3]), 0, fsl_imx95_memmap[FSL_IMX95_WDOG5].addr);
-    if (!sysbus_realize(SYS_BUS_DEVICE(&s->gpio[0]), errp)) {
-        return;
-    }
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->gpio[0]), 0, fsl_imx95_memmap[FSL_IMX95_GPIO1].addr);
-    if (!sysbus_realize(SYS_BUS_DEVICE(&s->gpio[1]), errp)) {
-        return;
-    }
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->gpio[1]), 0, fsl_imx95_memmap[FSL_IMX95_GPIO2].addr);
-    if (!sysbus_realize(SYS_BUS_DEVICE(&s->gpio[2]), errp)) {
-        return;
-    }
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->gpio[2]), 0, fsl_imx95_memmap[FSL_IMX95_GPIO3].addr);
-    if (!sysbus_realize(SYS_BUS_DEVICE(&s->gpio[3]), errp)) {
-        return;
-    }
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->gpio[3]), 0, fsl_imx95_memmap[FSL_IMX95_GPIO4].addr);
-    if (!sysbus_realize(SYS_BUS_DEVICE(&s->gpio[4]), errp)) {
-        return;
-    }
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->gpio[4]), 0, fsl_imx95_memmap[FSL_IMX95_GPIO5].addr);
+
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->adc), errp)) {
-        return;
+        return false;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->adc), 0, fsl_imx95_memmap[FSL_IMX95_ADC].addr);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->adc), 0,
                        qdev_get_gpio_in(gicdev, FSL_IMX95_ADC_IRQ));
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->src_gen), errp)) {
-        return;
+        return false;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->src_gen), 0, fsl_imx95_memmap[FSL_IMX95_SRC_GEN].addr);
 
@@ -885,41 +1065,43 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
             qdev_get_gpio_in_named(DEVICE(&s->blk_ctrl_aonmix), "a55-hold", i));
     }
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->fspi), errp)) {
-        return;
+        return false;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->fspi), 0, fsl_imx95_memmap[FSL_IMX95_FSPI1_REG].addr);
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->smmuv3), errp)) {
-        return;
+        return false;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->smmuv3), 0, fsl_imx95_memmap[FSL_IMX95_SMMUV3].addr);
 
     for (i = 0; i < IMX95_SMMU_PMCG_NUM; i++) {
-        hwaddr base = i == 0 ? 0x490d2000 : 0x49112000 + (i - 1) * 0x20000;
+        hwaddr base = i == 0 ? FSL_IMX95_SMMU_PMCG0_BASE :
+                      FSL_IMX95_SMMU_PMCG1_BASE +
+                      (i - 1) * FSL_IMX95_SMMU_PMCG_STRIDE;
 
         if (!sysbus_realize(SYS_BUS_DEVICE(&s->smmu_pmcg[i]), errp)) {
-            return;
+            return false;
         }
         sysbus_mmio_map_overlap(SYS_BUS_DEVICE(&s->smmu_pmcg[i]), 0, base, 1);
     }
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->tmpsns), errp)) {
-        return;
+        return false;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->tmpsns), 0, fsl_imx95_memmap[FSL_IMX95_A55_TMPSNS].addr);
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->fractpll), errp)) {
-        return;
+        return false;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->fractpll), 0, fsl_imx95_memmap[FSL_IMX95_FRACTPLL].addr);
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->bbnsm), errp)) {
-        return;
+        return false;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->bbnsm), 0, fsl_imx95_memmap[FSL_IMX95_BBNSM].addr);
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->ccm), errp)) {
-        return;
+        return false;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->ccm), 0, fsl_imx95_memmap[FSL_IMX95_CCM].addr);
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->sysctr), errp)) {
-        return;
+        return false;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->sysctr), 0,
                     fsl_imx95_memmap[FSL_IMX95_SYSCNT_CTRL].addr);
@@ -931,8 +1113,6 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
                        qdev_get_gpio_in(gicdev, FSL_IMX95_SYSCTR_IRQ));
 
     for (i = 0; i < 2; i++) {
-        static const int serdes_id[2] = { FSL_IMX95_PCIE0_APP, FSL_IMX95_PCIE1_APP };
-        static const int ecam_id[2] = { FSL_IMX95_NETC_ECAM0, FSL_IMX95_NETC_ECAM1 };
 
         qdev_prop_set_uint32(DEVICE(&s->pcie_serdes[i]), "devid-prefix",
                              i == 0 ? 0x00 : 0x80);
@@ -940,50 +1120,52 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
                              fsl_imx95_memmap[FSL_IMX95_GIC_ITS].addr +
                              ITS_CONTROL_SIZE + GITS_TRANSLATER);
         if (!sysbus_realize(SYS_BUS_DEVICE(&s->pcie_serdes[i]), errp)) {
-            return;
+            return false;
         }
         sysbus_mmio_map(SYS_BUS_DEVICE(&s->pcie_serdes[i]), 0,
-                        fsl_imx95_memmap[serdes_id[i]].addr);
+                        fsl_imx95_memmap[fsl_imx95_serdes_region[i]].addr);
         if (!sysbus_realize(SYS_BUS_DEVICE(&s->netc_ecam[i]), errp)) {
-            return;
+            return false;
         }
         sysbus_mmio_map(SYS_BUS_DEVICE(&s->netc_ecam[i]), 0,
-                        fsl_imx95_memmap[ecam_id[i]].addr);
+                        fsl_imx95_memmap[fsl_imx95_netc_ecam_region[i]].addr);
     }
 
+    /* MSI writes routed to the GIC ITS translator aperture. */
     for (i = 0; i < ARRAY_SIZE(s->pcie); i++) {
-        memory_region_add_subregion_overlap(
-            &s->pcie[i].address_space_root,
+        imx95_pcie_host_add_dma_window(
+            &s->pcie[i],
             fsl_imx95_memmap[FSL_IMX95_GIC_ITS].addr + ITS_CONTROL_SIZE +
             GITS_TRANSLATER,
-            sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->pcie_serdes[i]), 1), 10);
+            sysbus_mmio_get_region(SYS_BUS_DEVICE(&s->pcie_serdes[i]), 1),
+            10);
     }
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->hsio_blk_ctrl), errp)) {
-        return;
+        return false;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->hsio_blk_ctrl), 0,
                     fsl_imx95_memmap[FSL_IMX95_HSIO_BLK_CTRL].addr);
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->camera_csr), errp)) {
-        return;
+        return false;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->camera_csr), 0,
                     fsl_imx95_memmap[FSL_IMX95_CAMERA_CSR].addr);
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->camera_noc), errp)) {
-        return;
+        return false;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->camera_noc), 0,
                     fsl_imx95_memmap[FSL_IMX95_CAMERA_NOC].addr);
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->blk_ctrl_aonmix), errp)) {
-        return;
+        return false;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->blk_ctrl_aonmix), 0,
                     fsl_imx95_memmap[FSL_IMX95_BLK_CTRL_S_AONMIX].addr);
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->ele_mu), errp)) {
-        return;
+        return false;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->ele_mu), 0,
                     fsl_imx95_memmap[FSL_IMX95_ELE_MU].addr);
@@ -996,13 +1178,20 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
                                                           "ca55-irq-mask", 0));
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->v2x_dbg_mu), errp)) {
-        return;
+        return false;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->v2x_dbg_mu), 0,
                     fsl_imx95_memmap[FSL_IMX95_V2X_DBG_MU].addr);
     sysbus_connect_irq(SYS_BUS_DEVICE(&s->v2x_dbg_mu), 0,
                        qdev_get_gpio_in(gicdev, FSL_IMX95_V2X_DBG_MU_IRQ));
 
+
+    return true;
+}
+
+static void fsl_imx95_create_unimplemented_devices(void)
+{
+    int i;
 
     /* Unimplemented devices */
     for (i = 0; i < ARRAY_SIZE(fsl_imx95_memmap); i++) {
@@ -1080,7 +1269,43 @@ static void fsl_imx95_realize(DeviceState *dev, Error **errp)
                                         fsl_imx95_memmap[i].size);
             break;
         }
+    }}
+
+static void fsl_imx95_realize(DeviceState *dev, Error **errp)
+{
+    FslImx95State *s = FSL_IMX95(dev);
+    MemoryRegion *sysmem = get_system_memory();
+    DeviceState *gicdev = DEVICE(&s->gic);
+    DeviceState *m33dev = DEVICE(&s->m33);
+
+    if (!fsl_imx95_realize_core(s, dev, sysmem, gicdev, m33dev, errp) ||
+        !fsl_imx95_realize_communication(s, dev, sysmem, gicdev, m33dev,
+                                         errp) ||
+        !fsl_imx95_realize_peripherals(s, dev, sysmem, gicdev, errp)) {
+        return;
     }
+
+    fsl_imx95_create_unimplemented_devices();
+}
+
+I2CBus *fsl_imx95_get_i2c_bus(FslImx95State *s, unsigned int index)
+{
+    g_assert(index < FSL_IMX95_NUM_LPI2CS);
+    g_assert(s->lpi2c[index].bus != NULL);
+
+    return s->lpi2c[index].bus;
+}
+
+BusState *fsl_imx95_get_usdhc_bus(FslImx95State *s, unsigned int index)
+{
+    BusState *bus;
+
+    g_assert(index < FSL_IMX95_NUM_USDHCS);
+
+    bus = qdev_get_child_bus(DEVICE(&s->usdhc[index]), "sd-bus");
+    g_assert(bus != NULL);
+
+    return bus;
 }
 
 static void fsl_imx95_class_init(ObjectClass *oc, const void *data)
@@ -1102,3 +1327,4 @@ static const TypeInfo fsl_imx95_types[] = {
 };
 
 DEFINE_TYPES(fsl_imx95_types)
+

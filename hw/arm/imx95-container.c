@@ -15,41 +15,48 @@
 #include "hw/arm/imx95-container.h"
 #include "trace.h"
 
-static uint8_t cntr_version(const uint8_t *h)
+static uint8_t container_version(const uint8_t *h)
 {
     return h[0];
 }
 
-static uint32_t cntr_length(const uint8_t *h)
+static uint32_t container_length(const uint8_t *h)
 {
     return lduw_le_p(h + 1);
 }
 
-static uint8_t cntr_tag(const uint8_t *h)
+static uint8_t container_tag(const uint8_t *h)
 {
     return h[3];
 }
 
-static unsigned cntr_num_images(const uint8_t *h)
+static uint16_t container_sw_version(const uint8_t *h)
+{
+    return lduw_le_p(h + 8);
+}
+
+static unsigned int container_num_images(const uint8_t *h)
 {
     return h[11];
 }
 
-static bool cntr_header_valid(const uint8_t *h, unsigned set_version)
+static bool container_header_valid(const uint8_t *h,
+                                   unsigned int set_version)
 {
-    if (cntr_tag(h) != IMX95_CNTR_TAG &&
-        !(set_version == 2 && cntr_tag(h) == IMX95_CNTR_V2X_TAG)) {
+    /* V2 sets also accept the V2X container tag */
+    if (container_tag(h) != IMX95_CNTR_TAG &&
+        !(set_version == 2 && container_tag(h) == IMX95_CNTR_V2X_TAG)) {
         return false;
     }
-    return cntr_length(h) >= IMX95_CNTR_HEADER_SIZE;
+    return container_length(h) >= IMX95_CNTR_HEADER_SIZE;
 }
 
-static bool range_ok(uint64_t offset, uint64_t length, uint64_t total)
+static bool range_valid(uint64_t offset, uint64_t length, uint64_t total)
 {
     return offset <= total && length <= total - offset;
 }
 
-static bool u64_add(uint64_t a, uint64_t b, uint64_t *result)
+static bool u64_add_checked(uint64_t a, uint64_t b, uint64_t *result)
 {
     if (b > UINT64_MAX - a) {
         return false;
@@ -66,23 +73,26 @@ static bool image_is_executable_on(const Imx95ContainerImage *img,
            (img->flags & IMX95_IMG_CORE_MASK) == core;
 }
 
-static bool image_is_dummy(const Imx95ContainerImage *img)
+static bool image_is_ele(const Imx95ContainerImage *img)
 {
-    return (img->flags & IMX95_IMG_TYPE_MASK) == IMX95_IMG_TYPE_DUMMY;
+    return (img->flags & IMX95_IMG_TYPE_MASK) == IMX95_IMG_TYPE_ELE;
 }
 
-bool imx95_container_find_images(const Imx95ContainerMedia *m,
-                                 uint64_t set_base, bool lenient,
-                                 Imx95ContainerSelection *sel, Error **errp)
+/*
+ * Walk the ROM containers of the set
+ */
+static bool scan_set(const Imx95ContainerMedia *m, uint64_t set_base,
+                     bool lenient, Imx95ContainerSelection *sel, Error **errp)
 {
     uint8_t header[IMX95_CNTR_HEADER_SIZE];
     uint8_t entries[IMX95_MAX_IMAGES_PER_CNTR * IMX95_BOOT_IMG_ENTRY_SIZE];
     uint64_t container_off = 0;
-    unsigned set_version;
+    unsigned int set_version;
+    bool have_preferred_cm33 = false;
 
     memset(sel, 0, sizeof(*sel));
 
-    if (!range_ok(set_base, sizeof(header), m->size)) {
+    if (!range_valid(set_base, sizeof(header), m->size)) {
         error_setg(errp, "no container set header at offset 0x%" PRIx64,
                    set_base);
         return false;
@@ -91,7 +101,7 @@ bool imx95_container_find_images(const Imx95ContainerMedia *m,
         return false;
     }
 
-    set_version = cntr_version(header);
+    set_version = container_version(header);
     if (set_version != 0 && set_version != 2) {
         error_setg(errp, "unsupported container-set version %u", set_version);
         return false;
@@ -99,20 +109,24 @@ bool imx95_container_find_images(const Imx95ContainerMedia *m,
     sel->set_version = set_version;
     trace_imx95_container_set(set_version);
 
-    for (unsigned c = 0; c < IMX95_MAX_ROM_CONTAINERS; c++) {
+    for (unsigned int c = 0; c < IMX95_MAX_ROM_CONTAINERS; c++) {
         uint64_t header_off;
         uint64_t entries_off;
         uint32_t length;
         unsigned num_images;
         size_t entries_size;
+        bool is_nxp = false;
 
+        /* V2 sets: containers sit in fixed-size slots */
         if (set_version == 2) {
             container_off = (uint64_t)c * IMX95_CNTR_V2_SLOT_SIZE;
         }
 
-        if (!u64_add(set_base, container_off, &header_off) ||
-            !range_ok(header_off, sizeof(header), m->size)) {
-            if (lenient) {
+        if (!u64_add_checked(set_base, container_off, &header_off) ||
+            !range_valid(header_off, sizeof(header), m->size)) {
+
+            /* Only the first container is mandatory, unless lenient */
+            if (lenient || c > 0) {
                 break;
             }
             error_setg(errp, "container %u header lies outside the boot medium",
@@ -123,7 +137,7 @@ bool imx95_container_find_images(const Imx95ContainerMedia *m,
             return false;
         }
 
-        if (!cntr_header_valid(header, set_version)) {
+        if (!container_header_valid(header, set_version)) {
             if (c == 0 && !lenient) {
                 error_setg(errp, "invalid first container header at offset "
                            "0x%" PRIx64, header_off);
@@ -132,10 +146,15 @@ bool imx95_container_find_images(const Imx95ContainerMedia *m,
             break;
         }
 
-        length = cntr_length(header);
-        num_images = cntr_num_images(header);
-        trace_imx95_container_header(c + 1, header_off, cntr_version(header),
-                                     cntr_tag(header), length, num_images);
+        length = container_length(header);
+        num_images = container_num_images(header);
+        if (range_valid(header_off, length, m->size) &&
+            header_off + length > sel->end) {
+            sel->end = header_off + length;
+        }
+        trace_imx95_container_header(c + 1, header_off,
+                                       container_version(header),
+                                     container_tag(header), length, num_images);
 
         if (num_images == 0 || num_images > IMX95_MAX_IMAGES_PER_CNTR) {
             if (lenient) {
@@ -147,15 +166,21 @@ bool imx95_container_find_images(const Imx95ContainerMedia *m,
         }
 
         entries_size = (size_t)num_images * IMX95_BOOT_IMG_ENTRY_SIZE;
-        /* A firmware file is only checked against its own size (below). */
-        if (!lenient && length < IMX95_CNTR_HEADER_SIZE + entries_size) {
+        if (length < IMX95_CNTR_HEADER_SIZE + entries_size) {
             error_setg(errp, "container %u header length 0x%x cannot hold %u "
                        "image entries", c + 1, length, num_images);
             return false;
         }
+        if (set_version == 2 && length > IMX95_CNTR_V2_SLOT_SIZE) {
+            error_setg(errp, "container %u header length 0x%x exceeds the "
+                       "version 2 slot size 0x%x", c + 1, length,
+                       IMX95_CNTR_V2_SLOT_SIZE);
+            return false;
+        }
 
-        if (!u64_add(header_off, IMX95_CNTR_HEADER_SIZE, &entries_off) ||
-            !range_ok(entries_off, entries_size, m->size)) {
+        if (!u64_add_checked(header_off, IMX95_CNTR_HEADER_SIZE,
+                             &entries_off) ||
+            !range_valid(entries_off, entries_size, m->size)) {
             if (lenient) {
                 break;
             }
@@ -167,7 +192,7 @@ bool imx95_container_find_images(const Imx95ContainerMedia *m,
             return false;
         }
 
-        for (unsigned i = 0; i < num_images; i++) {
+        for (unsigned int i = 0; i < num_images; i++) {
             const uint8_t *e = entries + i * IMX95_BOOT_IMG_ENTRY_SIZE;
             Imx95ContainerImage img = {
                 .size = ldl_le_p(e + 0x04),
@@ -180,8 +205,8 @@ bool imx95_container_find_images(const Imx95ContainerMedia *m,
             };
             uint64_t base;
 
-            if (!u64_add(set_base, container_off, &base) ||
-                !u64_add(base, ldl_le_p(e + 0x00), &img.offset)) {
+            if (!u64_add_checked(set_base, container_off, &base) ||
+                !u64_add_checked(base, ldl_le_p(e + 0x00), &img.offset)) {
                 if (lenient) {
                     continue;
                 }
@@ -194,7 +219,7 @@ bool imx95_container_find_images(const Imx95ContainerMedia *m,
                                         img.offset, img.size, img.load_addr,
                                         img.entry_addr, img.flags);
 
-            if (!range_ok(img.offset, img.size, m->size)) {
+            if (!range_valid(img.offset, img.size, m->size)) {
                 if (lenient) {
                     continue;
                 }
@@ -205,16 +230,21 @@ bool imx95_container_find_images(const Imx95ContainerMedia *m,
                 return false;
             }
 
-            if (image_is_dummy(&img) && img.size == 0) {
-                sel->secondary_set_offset = img.offset;
-                sel->have_secondary_set = true;
-                continue;
+            if (img.size && img.offset + img.size > sel->end) {
+                sel->end = img.offset + img.size;
+            }
+            if (image_is_ele(&img)) {
+                is_nxp = true;
             }
 
             if (image_is_executable_on(&img, IMX95_IMG_CORE_CM33)) {
-                if (!sel->have_cm33 || img.load_addr == IMX95_SM_IMAGE_BASE) {
+                bool preferred = img.load_addr == IMX95_SM_IMAGE_BASE;
+
+                if (!sel->have_cm33 ||
+                    (preferred && !have_preferred_cm33)) {
                     sel->cm33 = img;
                     sel->have_cm33 = true;
+                    have_preferred_cm33 = preferred;
                 }
                 continue;
             }
@@ -229,7 +259,6 @@ bool imx95_container_find_images(const Imx95ContainerMedia *m,
 
             /*
              * The first executable Cortex-A55 image of the ROM container set
-             * is the SPL; its addresses come from the container.
              */
             if (image_is_executable_on(&img, IMX95_IMG_CORE_CA55) &&
                 !sel->have_a55_spl) {
@@ -238,11 +267,33 @@ bool imx95_container_find_images(const Imx95ContainerMedia *m,
             }
         }
 
+        if (container_tag(header) == IMX95_CNTR_TAG) {
+            if (is_nxp) {
+                if (!sel->have_nxp) {
+                    sel->have_nxp = true;
+                    sel->nxp_sw_version = container_sw_version(header);
+                }
+            } else if (!sel->have_oem) {
+                sel->have_oem = true;
+                sel->oem_sw_version = container_sw_version(header);
+            }
+        }
+
         if (set_version == 0) {
             container_off += QEMU_ALIGN_UP(length, IMX95_CNTR_ALIGN_V0);
         }
     }
 
+    return true;
+}
+
+bool imx95_container_find_images(const Imx95ContainerMedia *m,
+                                 uint64_t set_base, bool lenient,
+                                 Imx95ContainerSelection *sel, Error **errp)
+{
+    if (!scan_set(m, set_base, lenient, sel, errp)) {
+        return false;
+    }
     if (!sel->have_cm33) {
         error_setg(errp, "no Cortex-M33 executable image in the container "
                    "set");
@@ -251,59 +302,22 @@ bool imx95_container_find_images(const Imx95ContainerMedia *m,
     return true;
 }
 
-bool imx95_container_validate_set(const Imx95ContainerMedia *m,
-                                  uint64_t offset, Error **errp)
+bool imx95_container_probe_set(const Imx95ContainerMedia *m, uint64_t set_base,
+                               Imx95ContainerSelection *sel)
 {
-    uint8_t header[IMX95_CNTR_HEADER_SIZE];
-    uint32_t length;
-    unsigned version;
-    unsigned num_images;
+    Error *err = NULL;
+    bool ok = scan_set(m, set_base, true, sel, &err);
 
-    if (!range_ok(offset, sizeof(header), m->size)) {
-        error_setg(errp, "secondary container set header lies outside the boot "
-                   "medium (offset 0x%" PRIx64 ")", offset);
-        return false;
-    }
-    if (!m->read(m->opaque, offset, header, sizeof(header), errp)) {
-        return false;
-    }
-
-    version = cntr_version(header);
-    length = cntr_length(header);
-    num_images = cntr_num_images(header);
-
-    if (cntr_tag(header) != IMX95_CNTR_TAG) {
-        error_setg(errp, "invalid secondary container tag 0x%02x at offset "
-                   "0x%" PRIx64, cntr_tag(header), offset);
-        return false;
-    }
-    if (version != 0 && version != 2) {
-        error_setg(errp, "invalid secondary container version %u at offset "
-                   "0x%" PRIx64, version, offset);
-        return false;
-    }
-    if (num_images == 0 || num_images > IMX95_MAX_IMAGES_PER_CNTR) {
-        error_setg(errp, "invalid secondary image count %u at offset 0x%"
-                   PRIx64, num_images, offset);
-        return false;
-    }
-    if (length < IMX95_CNTR_HEADER_SIZE +
-                 (size_t)num_images * IMX95_BOOT_IMG_ENTRY_SIZE) {
-        error_setg(errp, "invalid secondary header length 0x%x for %u images",
-                   length, num_images);
-        return false;
-    }
-    if (!range_ok(offset, length, m->size)) {
-        error_setg(errp, "secondary container header lies outside the boot "
-                   "medium (offset 0x%" PRIx64 ", length 0x%x)", offset, length);
-        return false;
-    }
-
-    trace_imx95_container_secondary_set(offset, version, cntr_tag(header),
-                                        length, num_images);
-    return true;
+    error_free(err);
+    trace_imx95_container_probe(set_base, ok && sel->have_oem,
+                                sel->oem_sw_version, sel->have_nxp,
+                                sel->nxp_sw_version, sel->end);
+    return ok && sel->have_oem;
 }
 
+/*
+ * Basic vector-table sanity check
+ */
 bool imx95_container_cm33_vectors_valid(const uint8_t *payload, uint32_t size)
 {
     uint32_t initial_msp;
@@ -317,3 +331,4 @@ bool imx95_container_cm33_vectors_valid(const uint8_t *payload, uint32_t size)
 
     return initial_msp != 0 && reset_vector != 0 && (reset_vector & 1) != 0;
 }
+

@@ -2718,8 +2718,10 @@ static size_t sd_write_data(SDState *sd, const void *buf, size_t length)
             }
         }
 
+        /* Copy what fits in the block, not one byte at a time */
         length = MIN(blk_len - sd->data_offset, length);
         if (!length) {
+            /* Always consume at least one byte */
             length = 1;
         }
         memcpy(&sd->data[sd->data_offset], buf, length);

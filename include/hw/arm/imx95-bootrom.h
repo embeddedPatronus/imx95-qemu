@@ -24,12 +24,18 @@ typedef struct Imx95BootRomInfo {
     hwaddr m7_load_addr;
     hwaddr m7_entry_addr;
     uint32_t m7_size;
-    bool secondary_set_valid;
-    uint32_t secondary_set_offset;
+
+    unsigned img_set;
+    uint32_t img_set_offset;
+    uint32_t img_set_end;
 } Imx95BootRomInfo;
 
+/*
+ * @boot_cfg8: the BOOT_CFG8 fuse word, which holds secondary boot offset
+ */
 bool imx95_bootrom_load(Imx95BootRomInfo *info, BlockBackend *sd,
-                        const char *kernel_filename, Error **errp);
+                        const char *kernel_filename, uint32_t boot_cfg8,
+                        Error **errp);
 
 void imx95_bootrom_add_handover(const Imx95BootRomInfo *info);
 

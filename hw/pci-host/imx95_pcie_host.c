@@ -2,7 +2,7 @@
  * NXP i.MX95 PCIe root complex
  *
  * DesignWare PCIe controller that the i.MX95 uses for PCIe0 and PCIe1 in root complex mode
- * the link comes up only when LTSSM_EN is set in the SerDes subsystem and a device is present. 
+ * the link comes up only when LTSSM_EN is set in the SerDes subsystem and a device is present.
  * An empty slot reports link down.
  *
  * Copyright (c) 2026 Gaurav Sharma <gaurav.sharma0394@gmail.com>
@@ -192,7 +192,7 @@ static void imx95_pcie_update_ib(Imx95PcieHost *s, unsigned i)
 static uint64_t imx95_pcie_atu_read(void *opaque, hwaddr off, unsigned size)
 {
     Imx95PcieHost *s = opaque;
-    unsigned idx = off >> 9;
+    unsigned int idx = off >> 9;
     bool ib = (off >> 8) & 1;
     const Imx95PcieAtu *a;
 
@@ -227,7 +227,7 @@ static void imx95_pcie_atu_write(void *opaque, hwaddr off, uint64_t val,
                                     unsigned size)
 {
     Imx95PcieHost *s = opaque;
-    unsigned idx = off >> 9;
+    unsigned int idx = off >> 9;
     bool ib = (off >> 8) & 1;
     Imx95PcieAtu *a;
 
@@ -329,10 +329,11 @@ static void imx95_pcie_count_dev(PCIBus *bus, PCIDevice *dev, void *opaque)
     (*(unsigned *)opaque)++;
 }
 
+/* Up once LTSSM is enabled and a device is present */
 static bool imx95_pcie_link_up(Imx95PcieHost *s)
 {
     PCIBus *sec = pci_bridge_get_sec_bus(PCI_BRIDGE(&s->root));
-    unsigned devices = 0;
+    unsigned int devices = 0;
 
     if (!s->ltssm_en || !sec) {
         return false;
@@ -363,12 +364,13 @@ static uint32_t imx95_pcie_pl_word(Imx95PcieRoot *root, unsigned off)
     case PL_VERSION_TYPE:
         return VERSION_TYPE;
     case PL_ATU_VIEWPORT:
+        /* All-ones: the iATU is unrolled */
         return 0xffffffff;
     default:
         if (off >= PL_BASE && off < PL_ATU_VIEWPORT) {
             return root->pl[(off - PL_BASE) / 4];
         }
-        return 0; 
+        return 0;
     }
 }
 
@@ -379,7 +381,7 @@ static uint32_t imx95_pcie_root_config_read(PCIDevice *d, uint32_t address,
 
     if (address >= PL_BASE && address < PL_LEGACY_END) {
         uint32_t word = imx95_pcie_pl_word(root, address & ~3u);
-        unsigned sh = (address & 3) * 8;
+        unsigned int sh = (address & 3) * 8;
 
         word >>= sh;
         return len >= 4 ? word : word & ((1u << (len * 8)) - 1);
@@ -393,8 +395,8 @@ static void imx95_pcie_root_config_write(PCIDevice *d, uint32_t address,
     Imx95PcieRoot *root = IMX95_PCIE_ROOT(d);
 
     if (address >= PL_BASE && address < PL_LEGACY_END) {
-        unsigned word_off = address & ~3u;
-        unsigned sh = (address & 3) * 8;
+        unsigned int word_off = address & ~3u;
+        unsigned int sh = (address & 3) * 8;
         uint32_t mask = (len >= 4 ? ~0u : (1u << (len * 8)) - 1) << sh;
         uint32_t cur, next;
 
@@ -412,6 +414,7 @@ static void imx95_pcie_root_config_write(PCIDevice *d, uint32_t address,
         cur = root->pl[(word_off - PL_BASE) / 4];
         next = (cur & ~mask) | ((val << sh) & mask);
         if (word_off == PL_LINK_WIDTH_SPEED_CONTROL) {
+            /* Speed change completes at once, the bit self-clears */
             next &= ~PL_SPEED_CHANGE;
         }
         root->pl[(word_off - PL_BASE) / 4] = next;
@@ -532,6 +535,13 @@ static const char *imx95_pcie_root_bus_path(PCIHostState *host_bridge,
     return s->root_path;
 }
 
+void imx95_pcie_host_add_dma_window(Imx95PcieHost *s, hwaddr addr,
+                                      MemoryRegion *mr, int priority)
+{
+    memory_region_add_subregion_overlap(&s->address_space_root, addr, mr,
+                                        priority);
+}
+
 static AddressSpace *imx95_pcie_iommu_as(PCIBus *bus, void *opaque,
                                             int devfn)
 {
@@ -544,9 +554,19 @@ static const PCIIOMMUOps imx95_pcie_iommu_ops = {
     .get_address_space = imx95_pcie_iommu_as,
 };
 
+static void imx95_pcie_invalidate_applied_maps(Imx95PcieHost *s)
+{
+    unsigned int i;
+
+    for (i = 0; i < IMX95_PCIE_NUM_ATU; i++) {
+        s->ob_region[i].applied = (Imx95PcieMap){ .kind = MAP_NONE };
+        s->ib_region[i].applied = (Imx95PcieMap){ .kind = MAP_NONE };
+    }
+}
+
 static void imx95_pcie_update_all(Imx95PcieHost *s)
 {
-    for (unsigned i = 0; i < IMX95_PCIE_NUM_ATU; i++) {
+    for (unsigned int i = 0; i < IMX95_PCIE_NUM_ATU; i++) {
         imx95_pcie_update_ob(s, i);
         imx95_pcie_update_ib(s, i);
     }
@@ -633,7 +653,9 @@ static void imx95_pcie_host_realize(DeviceState *dev, Error **errp)
         memory_region_set_enabled(&b->mem, false);
     }
 
-    qdev_realize(DEVICE(&s->root), BUS(pci->bus), &error_fatal);
+    if (!qdev_realize(DEVICE(&s->root), BUS(pci->bus), errp)) {
+        return;
+    }
 }
 
 static void imx95_pcie_host_reset(DeviceState *dev)
@@ -650,10 +672,7 @@ static int imx95_pcie_host_post_load(void *opaque, int version_id)
 {
     Imx95PcieHost *s = opaque;
 
-    for (unsigned i = 0; i < IMX95_PCIE_NUM_ATU; i++) {
-        s->ob_region[i].applied = (Imx95PcieMap){ .kind = MAP_NONE };
-        s->ib_region[i].applied = (Imx95PcieMap){ .kind = MAP_NONE };
-    }
+    imx95_pcie_invalidate_applied_maps(s);
     imx95_pcie_update_all(s);
     return 0;
 }
@@ -742,3 +761,4 @@ static const TypeInfo imx95_pcie_types[] = {
 };
 
 DEFINE_TYPES(imx95_pcie_types)
+

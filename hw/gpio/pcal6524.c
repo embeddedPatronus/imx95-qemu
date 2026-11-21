@@ -9,32 +9,32 @@
 #include "qemu/osdep.h"
 #include "hw/core/irq.h"
 #include "hw/gpio/pcal6524.h"
-#include "qemu/log.h"
 #include "migration/vmstate.h"
 #include "qemu/module.h"
 
-#define PCAL6524_CMD_AI                 0x80
-#define PCAL6524_CMD_REG_MASK           0x7f
+#define PCAL6524_CMD_AI       0x80
+#define PCAL6524_CMD_REG_MASK 0x7f
 
-#define PCAL6524_INPUT_PORT0            0x00
-#define PCAL6524_OUTPUT_PORT0           0x04
-#define PCAL6524_POLARITY_PORT0         0x08
-#define PCAL6524_CONFIG_PORT0           0x0c
-#define PCAL6524_OUTPUT_DRIVE0          0x40
-#define PCAL6524_INPUT_LATCH0           0x48
-#define PCAL6524_PULL_ENABLE0           0x4c
-#define PCAL6524_PULL_SELECT0           0x50
-#define PCAL6524_INT_MASK0              0x54
-#define PCAL6524_INT_STATUS0            0x58
-#define PCAL6524_OUTPUT_CONFIG          0x5c
-#define PCAL6524_INT_EDGE0              0x60
-#define PCAL6524_INT_CLEAR0             0x68
-#define PCAL6524_INPUT_STATUS0          0x6c
-#define PCAL6524_PIN_OUTPUT_CONFIG0     0x70
-#define PCAL6524_DEBOUNCE_ENABLE0       0x74
-#define PCAL6524_DEBOUNCE_COUNT         0x76
+#define PCAL6524_INPUT_PORT0         0x00
+#define PCAL6524_OUTPUT_PORT0        0x04
+#define PCAL6524_POLARITY_PORT0      0x08
+#define PCAL6524_CONFIG_PORT0        0x0c
+#define PCAL6524_OUTPUT_DRIVE0       0x40
+#define PCAL6524_INPUT_LATCH0        0x48
+#define PCAL6524_PULL_ENABLE0        0x4c
+#define PCAL6524_PULL_SELECT0        0x50
+#define PCAL6524_INT_MASK0           0x54
+#define PCAL6524_INT_STATUS0         0x58
+#define PCAL6524_OUTPUT_CONFIG       0x5c
+#define PCAL6524_INT_EDGE0           0x60
+#define PCAL6524_INT_CLEAR0          0x68
+#define PCAL6524_INPUT_STATUS0       0x6c
+#define PCAL6524_PIN_OUTPUT_CONFIG0  0x70
+#define PCAL6524_DEBOUNCE_ENABLE0    0x74
+#define PCAL6524_DEBOUNCE_COUNT      0x76
 
-static bool pcal6524_is_port_reg(uint8_t reg, uint8_t base, unsigned count)
+static bool pcal6524_is_port_reg(uint8_t reg, uint8_t base,
+                                 unsigned int count)
 {
     return reg >= base && reg < base + count;
 }
@@ -68,7 +68,8 @@ static void pcal6524_update_outputs(PCAL6524State *s)
     }
 }
 
-static uint8_t pcal6524_input_port(PCAL6524State *s, unsigned int port)
+static uint8_t pcal6524_input_port(PCAL6524State *s,
+                                   unsigned int port)
 {
     uint8_t config = s->regs[PCAL6524_CONFIG_PORT0 + port];
     uint8_t output = s->regs[PCAL6524_OUTPUT_PORT0 + port];
@@ -97,7 +98,8 @@ static uint8_t pcal6524_read(PCAL6524State *s, uint8_t reg)
     return 0xff;
 }
 
-static void pcal6524_write(PCAL6524State *s, uint8_t reg, uint8_t value)
+static void pcal6524_write(PCAL6524State *s, uint8_t reg,
+                           uint8_t value)
 {
     unsigned int port;
 
@@ -116,6 +118,7 @@ static void pcal6524_write(PCAL6524State *s, uint8_t reg, uint8_t value)
 
     if (pcal6524_is_port_reg(reg, PCAL6524_INT_CLEAR0,
                              PCAL6524_NUM_PORTS)) {
+        /* Writing a 1 clears the matching interrupt status bit */
         port = reg - PCAL6524_INT_CLEAR0;
         s->regs[PCAL6524_INT_STATUS0 + port] &= ~value;
         pcal6524_update_irq(s);
@@ -148,10 +151,6 @@ static int pcal6524_event(I2CSlave *i2c, enum i2c_event event)
 {
     PCAL6524State *s = PCAL6524(i2c);
 
-    qemu_log_mask(LOG_GUEST_ERROR,
-                  "pcal6524: event=%u\n",
-                  event);
-
     switch (event) {
     case I2C_START_SEND:
         s->have_reg_ptr = false;
@@ -170,10 +169,6 @@ static int pcal6524_send(I2CSlave *i2c, uint8_t data)
 {
     PCAL6524State *s = PCAL6524(i2c);
 
-    qemu_log_mask(LOG_GUEST_ERROR,
-                  "pcal6524: send data=0x%02x have_ptr=%u\n",
-                  data, s->have_reg_ptr);
-
     if (!s->have_reg_ptr) {
         s->auto_increment = data & PCAL6524_CMD_AI;
         s->reg_ptr = data & PCAL6524_CMD_REG_MASK;
@@ -191,10 +186,8 @@ static uint8_t pcal6524_recv(I2CSlave *i2c)
     PCAL6524State *s = PCAL6524(i2c);
     uint8_t value = pcal6524_read(s, s->reg_ptr);
 
-     qemu_log_mask(LOG_GUEST_ERROR,
-                  "pcal6524: recv reg=0x%02x value=0x%02x\n",
-                  s->reg_ptr, value);
     pcal6524_advance_pointer(s);
+
     return value;
 }
 
@@ -241,24 +234,41 @@ static void pcal6524_reset(DeviceState *dev)
     pcal6524_update_irq(s);
 }
 
+static int pcal6524_post_load(void *opaque, int version_id)
+{
+    PCAL6524State *s = opaque;
+
+    if (s->reg_ptr & ~PCAL6524_CMD_REG_MASK) {
+        return -EINVAL;
+    }
+
+    pcal6524_update_outputs(s);
+    pcal6524_update_irq(s);
+
+    return 0;
+}
+
 static const VMStateDescription vmstate_pcal6524 = {
     .name = TYPE_PCAL6524,
     .version_id = 1,
     .minimum_version_id = 1,
+    .post_load = pcal6524_post_load,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT8_ARRAY(regs, PCAL6524State, PCAL6524_NUM_REGS),
-        VMSTATE_UINT8_ARRAY(ext_state, PCAL6524State, PCAL6524_NUM_PORTS),
+        VMSTATE_UINT8_ARRAY(ext_state, PCAL6524State,
+                            PCAL6524_NUM_PORTS),
         VMSTATE_UINT8(reg_ptr, PCAL6524State),
         VMSTATE_BOOL(auto_increment, PCAL6524State),
         VMSTATE_BOOL(have_reg_ptr, PCAL6524State),
         VMSTATE_I2C_SLAVE(parent_obj, PCAL6524State),
         VMSTATE_END_OF_LIST()
-    }
+    },
 };
 
-static void pcal6524_realize(DeviceState *dev, Error **errp)
+static void pcal6524_init(Object *obj)
 {
-    PCAL6524State *s = PCAL6524(dev);
+    PCAL6524State *s = PCAL6524(obj);
+    DeviceState *dev = DEVICE(obj);
 
     qdev_init_gpio_in(dev, pcal6524_gpio_input, PCAL6524_NUM_PINS);
     qdev_init_gpio_out(dev, s->gpio_out, PCAL6524_NUM_PINS);
@@ -271,7 +281,6 @@ static void pcal6524_class_init(ObjectClass *klass, const void *data)
     I2CSlaveClass *isc = I2C_SLAVE_CLASS(klass);
 
     dc->desc = "NXP PCAL6524 24-bit I2C GPIO expander";
-    dc->realize = pcal6524_realize;
     dc->vmsd = &vmstate_pcal6524;
     device_class_set_legacy_reset(dc, pcal6524_reset);
 
@@ -284,6 +293,7 @@ static const TypeInfo pcal6524_info = {
     .name = TYPE_PCAL6524,
     .parent = TYPE_I2C_SLAVE,
     .instance_size = sizeof(PCAL6524State),
+    .instance_init = pcal6524_init,
     .class_init = pcal6524_class_init,
 };
 
@@ -293,3 +303,4 @@ static void pcal6524_register_types(void)
 }
 
 type_init(pcal6524_register_types)
+

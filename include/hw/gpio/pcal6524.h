@@ -10,7 +10,6 @@
 #define HW_GPIO_PCAL6524_H
 
 #include "hw/i2c/i2c.h"
-#include "qom/object.h"
 
 #define TYPE_PCAL6524 "pcal6524"
 OBJECT_DECLARE_SIMPLE_TYPE(PCAL6524State, PCAL6524)
@@ -27,9 +26,9 @@ struct PCAL6524State {
     uint8_t reg_ptr;
     bool auto_increment;
     bool have_reg_ptr;
-
     qemu_irq gpio_out[PCAL6524_NUM_PINS];
     qemu_irq irq;
 };
 
 #endif /* HW_GPIO_PCAL6524_H */
+

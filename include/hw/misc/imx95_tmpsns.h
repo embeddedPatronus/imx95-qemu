@@ -24,6 +24,8 @@ struct Imx95TmpsnsState {
 
     MemoryRegion iomem;
     uint32_t regs[IMX95_TMPSNS_SIZE / sizeof(uint32_t)];
+
+    uint32_t temp_raw;
 };
 
 #endif /* HW_MISC_IMX95_TMPSNS_H */

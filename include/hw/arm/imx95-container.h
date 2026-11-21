@@ -24,7 +24,7 @@
 #define IMX95_IMG_TYPE_MASK          0x0000000f
 #define IMX95_IMG_CORE_MASK          0x000000f0
 #define IMX95_IMG_TYPE_EXECUTABLE    0x3
-#define IMX95_IMG_TYPE_DUMMY         0xe
+#define IMX95_IMG_TYPE_ELE           0x6
 #define IMX95_IMG_CORE_CM33          0x10
 #define IMX95_IMG_CORE_CA55          0x20
 #define IMX95_IMG_CORE_CM7           0xb0
@@ -55,20 +55,26 @@ typedef struct Imx95ContainerSelection {
     bool have_cm33;
     bool have_a55_spl;
     bool have_cm7;
-    bool have_secondary_set;
+    bool have_nxp;
+    bool have_oem;
+    uint16_t nxp_sw_version;
+    uint16_t oem_sw_version;
+    uint64_t end;
     unsigned set_version;
-    uint64_t secondary_set_offset;
     Imx95ContainerImage cm33;
     Imx95ContainerImage a55_spl;
     Imx95ContainerImage cm7;
 } Imx95ContainerSelection;
 
+/*
+ * Walk the container set that starts at @set_base
+ */
 bool imx95_container_find_images(const Imx95ContainerMedia *m,
                                  uint64_t set_base, bool lenient,
                                  Imx95ContainerSelection *sel, Error **errp);
 
-bool imx95_container_validate_set(const Imx95ContainerMedia *m,
-                                  uint64_t offset, Error **errp);
+bool imx95_container_probe_set(const Imx95ContainerMedia *m, uint64_t set_base,
+                               Imx95ContainerSelection *sel);
 
 bool imx95_container_cm33_vectors_valid(const uint8_t *payload, uint32_t size);
 

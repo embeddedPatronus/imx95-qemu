@@ -8,12 +8,9 @@
 
 #include "qemu/osdep.h"
 #include "qemu/bitops.h"
-#include "qemu/error-report.h"
 #include "qemu/log.h"
-#include "hw/core/qdev-properties.h"
 #include "hw/misc/imx95_tpm_pwm.h"
 #include "migration/vmstate.h"
-#include "hw/core/irq.h"
 #include "system/memory.h"
 
 #define IMX95_TPM_VERID                 0x000
@@ -26,9 +23,13 @@
 #define IMX95_TPM_CNV_BASE              0x024
 #define IMX95_TPM_CHANNEL_STRIDE        0x008
 
-#define IMX95_TPM_CHANNEL_COUNT         8U
 #define IMX95_TPM_PARAM_CHANNEL_MASK    MAKE_64BIT_MASK(0, 8)
 #define IMX95_TPM_CNSC_CHF              BIT(7)
+
+static unsigned int imx95_tpm_pwm_reg_index(hwaddr offset)
+{
+    return offset / sizeof(uint32_t);
+}
 
 
 static bool imx95_tpm_pwm_channel_reg(hwaddr offset,
@@ -80,7 +81,7 @@ static uint64_t imx95_tpm_pwm_read(void *opaque,
         return 0;
     }
 
-    value = s->regs[offset / sizeof(uint32_t)];
+    value = s->regs[imx95_tpm_pwm_reg_index(offset)];
 
     if (offset == IMX95_TPM_PARAM ||
         offset == IMX95_TPM_GLOBAL ||
@@ -97,6 +98,7 @@ static uint64_t imx95_tpm_pwm_read(void *opaque,
     return value;
 }
 
+/* Registers only: the counter does not run, no PWM output */
 static void imx95_tpm_pwm_write(void *opaque,
                                 hwaddr offset,
                                 uint64_t value,
@@ -119,7 +121,7 @@ static void imx95_tpm_pwm_write(void *opaque,
         return;
     }
 
-    old_value = s->regs[offset / sizeof(uint32_t)];
+    old_value = s->regs[imx95_tpm_pwm_reg_index(offset)];
 
     switch (offset) {
     case IMX95_TPM_VERID:
@@ -140,7 +142,7 @@ static void imx95_tpm_pwm_write(void *opaque,
                      ~(uint32_t)value);
     }
 
-    s->regs[offset / sizeof(uint32_t)] = new_value;
+    s->regs[imx95_tpm_pwm_reg_index(offset)] = new_value;
 
     if (offset == IMX95_TPM_GLOBAL ||
         offset == IMX95_TPM_SC ||
@@ -176,12 +178,12 @@ static void imx95_tpm_pwm_reset(DeviceState *dev)
     memset(s->regs, 0, sizeof(s->regs));
 
 
-    s->regs[IMX95_TPM_PARAM / sizeof(uint32_t)] =
+    s->regs[imx95_tpm_pwm_reg_index(IMX95_TPM_PARAM)] =
         IMX95_TPM_CHANNEL_COUNT & IMX95_TPM_PARAM_CHANNEL_MASK;
 
-    s->regs[IMX95_TPM_SC / sizeof(uint32_t)] = 0;
-    s->regs[IMX95_TPM_CNT / sizeof(uint32_t)] = 0;
-    s->regs[IMX95_TPM_MOD / sizeof(uint32_t)] = UINT16_MAX;
+    s->regs[imx95_tpm_pwm_reg_index(IMX95_TPM_SC)] = 0;
+    s->regs[imx95_tpm_pwm_reg_index(IMX95_TPM_CNT)] = 0;
+    s->regs[imx95_tpm_pwm_reg_index(IMX95_TPM_MOD)] = UINT16_MAX;
 }
 
 static void imx95_tpm_pwm_init(Object *obj)
@@ -189,7 +191,8 @@ static void imx95_tpm_pwm_init(Object *obj)
     Imx95TpmPwmState *s = IMX95_TPM_PWM(obj);
 
     memory_region_init_io(&s->iomem, obj, &imx95_tpm_pwm_ops, s,
-                          TYPE_IMX95_TPM_PWM, IMX95_TPM_PWM_SIZE);
+                          TYPE_IMX95_TPM_PWM,
+                          IMX95_TPM_PWM_SIZE);
     sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->iomem);
 }
 
@@ -198,7 +201,8 @@ static const VMStateDescription vmstate_imx95_tpm_pwm = {
     .version_id = 1,
     .minimum_version_id = 1,
     .fields = (const VMStateField[]) {
-        VMSTATE_UINT32_ARRAY(regs, Imx95TpmPwmState, IMX95_TPM_PWM_SIZE / sizeof(uint32_t)),
+        VMSTATE_UINT32_ARRAY(regs, Imx95TpmPwmState,
+                             IMX95_TPM_REGISTER_COUNT),
         VMSTATE_END_OF_LIST()
     }
 };
@@ -209,7 +213,7 @@ static void imx95_tpm_pwm_class_init(ObjectClass *oc, const void *data)
 
     device_class_set_legacy_reset(dc, imx95_tpm_pwm_reset);
     dc->vmsd = &vmstate_imx95_tpm_pwm;
-    dc->desc = "i.MX95 tpm pwm";
+    dc->desc = "i.MX95 TPM/PWM";
 }
 
 static const TypeInfo imx95_tpm_pwm_types[] = {
@@ -223,3 +227,4 @@ static const TypeInfo imx95_tpm_pwm_types[] = {
 };
 
 DEFINE_TYPES(imx95_tpm_pwm_types)
+

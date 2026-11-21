@@ -169,6 +169,12 @@ static void imx95_blk_ctrl_a55_gic_wake_in(void *opaque, int n, int level)
     imx95_blk_ctrl_a55_wake_eval(s, n);
 }
 
+uint32_t imx95_blk_ctrl_s_aonmix_get_m7_initvtor(
+    Imx95BlkCtrlSAonmixState *s)
+{
+    return s->m7_initvtor;
+}
+
 static uint64_t imx95_blk_ctrl_s_aonmix_read(void *opaque,
                                              hwaddr offset,
                                              unsigned size)
@@ -192,10 +198,10 @@ static void imx95_blk_ctrl_a55_hold_in(void *opaque, int n, int level)
     if (!level) {
         return;
     }
-    if (n < IMX95_BLK_CTRL_NUM_A55) {
+    if (n < s->num_a55) {
         imx95_blk_ctrl_a55_stop(s, n);
-    } else {
-        for (unsigned int i = 0; i < IMX95_BLK_CTRL_NUM_A55; i++) {
+    } else if (n == s->num_a55) {
+        for (unsigned int i = 0; i < s->num_a55; i++) {
             imx95_blk_ctrl_a55_stop(s, i);
         }
     }
@@ -209,7 +215,7 @@ static void imx95_blk_ctrl_s_aonmix_check_a55_release(
     unsigned int cpu_index;
 
     for (cpu_index = 0;
-         cpu_index < IMX95_BLK_CTRL_NUM_A55;
+         cpu_index < s->num_a55;
          cpu_index++) {
         hwaddr rvbar_l_offset;
         hwaddr rvbar_h_offset;
@@ -284,7 +290,7 @@ static void imx95_blk_ctrl_s_aonmix_write(void *opaque,
     }
     if (offset == IMX95_ELE_MU3_CA55_MASK_REG) {
         qemu_set_irq(s->ele_mu3_irq_mask,
-                     ((uint32_t)value & IMX95_ELE_MU3_CA55_MASK_BIT) != 0U);
+                     ((uint32_t)value & BIT(s->ele_irq_mask_bit)) != 0U);
         return;
     }
     if (offset == BLK_CTRL_CA55_CPUWAIT) {
@@ -314,6 +320,7 @@ static void imx95_blk_ctrl_s_aonmix_reset(DeviceState *dev)
 
     memset(s->regs, 0, sizeof(s->regs));
 
+    /* All A55 cores start held in wait */
     s->regs[BLK_CTRL_CA55_CPUWAIT / 4] = 0x3f;
     s->regs[BLK_CTRL_M7_CFG / 4] = BLK_CTRL_M7_CFG_WAIT;
     s->m7_initvtor = 0;
@@ -324,7 +331,8 @@ static void imx95_blk_ctrl_s_aonmix_reset(DeviceState *dev)
     }
 
     s->regs[IMX95_ELE_MU3_CA55_MASK_REG / sizeof(uint32_t)] &=
-        ~IMX95_ELE_MU3_CA55_MASK_BIT;
+        ~BIT(s->ele_irq_mask_bit);
+    s->regs[BLK_CTRL_CA55_MODE / sizeof(uint32_t)] = s->ca55_mode_reset;
 
     s->a55_released = false;
     memset(s->a55_pwrdn, 0, sizeof(s->a55_pwrdn));
@@ -338,7 +346,7 @@ static void imx95_blk_ctrl_s_aonmix_reset(DeviceState *dev)
 
     qemu_set_irq(s->ele_mu3_irq_mask,
                  (s->regs[IMX95_ELE_MU3_CA55_MASK_REG / sizeof(uint32_t)] &
-                  IMX95_ELE_MU3_CA55_MASK_BIT) != 0U);
+                  BIT(s->ele_irq_mask_bit)) != 0U);
 }
 
 static void imx95_blk_ctrl_s_aonmix_init(Object *obj)
@@ -376,11 +384,21 @@ static const VMStateDescription vmstate_imx95_blk_ctrl_s_aonmix = {
     }
 };
 
+static const Property imx95_blk_ctrl_s_aonmix_properties[] = {
+    DEFINE_PROP_UINT32("num-a55", Imx95BlkCtrlSAonmixState, num_a55,
+                       IMX95_BLK_CTRL_NUM_A55),
+    DEFINE_PROP_UINT32("ele-irq-mask-bit", Imx95BlkCtrlSAonmixState,
+                       ele_irq_mask_bit, 24),
+    DEFINE_PROP_UINT32("ca55-mode-reset", Imx95BlkCtrlSAonmixState,
+                       ca55_mode_reset, 0x3f),
+};
+
 static void imx95_blk_ctrl_s_aonmix_class_init(ObjectClass *oc, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
 
     device_class_set_legacy_reset(dc, imx95_blk_ctrl_s_aonmix_reset);
+    device_class_set_props(dc, imx95_blk_ctrl_s_aonmix_properties);
     dc->vmsd = &vmstate_imx95_blk_ctrl_s_aonmix;
     dc->desc = "i.MX95 blk ctrl s aonmix";
 }
@@ -396,3 +414,4 @@ static const TypeInfo imx95_blk_ctrl_s_aonmix_types[] = {
 };
 
 DEFINE_TYPES(imx95_blk_ctrl_s_aonmix_types)
+

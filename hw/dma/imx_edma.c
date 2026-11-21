@@ -106,21 +106,21 @@ static const struct IMXEDMATcdLayout tcd_v5 = {
 };
 
 /* Transfer sizes of TCD ATTR[SSIZE] and ATTR[DSIZE] */
-static const unsigned xfer_size[8] = { 1, 2, 4, 8, 16, 32, 64, 0 };
+static const unsigned int xfer_size[8] = { 1, 2, 4, 8, 16, 32, 64, 0 };
 
-static uint8_t *edma_tcd(IMXEDMAState *s, unsigned ch)
+static uint8_t *edma_tcd(IMXEDMAState *s, unsigned int ch)
 {
     return &s->tcd[ch * IMX_EDMA_TCD_BYTES];
 }
 
 static uint64_t tcd_get_addr(const struct IMXEDMATcdLayout *l,
-                             const uint8_t *t, unsigned off)
+                             const uint8_t *t, unsigned int off)
 {
     return l->a64 ? ldq_le_p(t + off) : (uint32_t)ldl_le_p(t + off);
 }
 
 static void tcd_set_addr(const struct IMXEDMATcdLayout *l, uint8_t *t,
-                         unsigned off, uint64_t v)
+                         unsigned int off, uint64_t v)
 {
     if (l->a64) {
         stq_le_p(t + off, v);
@@ -130,7 +130,7 @@ static void tcd_set_addr(const struct IMXEDMATcdLayout *l, uint8_t *t,
 }
 
 static uint64_t tcd_get_adj(const struct IMXEDMATcdLayout *l,
-                            const uint8_t *t, unsigned off)
+                            const uint8_t *t, unsigned int off)
 {
     return l->a64 ? ldq_le_p(t + off) : (uint64_t)(int32_t)ldl_le_p(t + off);
 }
@@ -140,8 +140,9 @@ static uint64_t edma_addr(const struct IMXEDMATcdLayout *l, uint64_t a)
     return l->a64 ? a : (uint32_t)a;
 }
 
-static uint64_t edma_next_addr(const struct IMXEDMATcdLayout *l, uint64_t addr,
-                               int64_t off, unsigned mod)
+static uint64_t edma_next_addr(const struct IMXEDMATcdLayout *l,
+                               uint64_t addr, int64_t off,
+                               unsigned int mod)
 {
     uint64_t next = addr + off;
 
@@ -153,10 +154,10 @@ static uint64_t edma_next_addr(const struct IMXEDMATcdLayout *l, uint64_t addr,
     return edma_addr(l, next);
 }
 
-static void edma_update_ch_irq(IMXEDMAState *s, unsigned ch)
+static void edma_update_ch_irq(IMXEDMAState *s, unsigned int ch)
 {
     if (s->paired_irqs) {
-        unsigned first = ch & ~1u;
+        unsigned int first = ch & ~1u;
         bool level = s->ch_int[first] & 1;
 
         if (first + 1 < s->num_channels) {
@@ -172,30 +173,44 @@ static void edma_update_err_irq(IMXEDMAState *s)
 {
     bool active = false;
 
-    for (unsigned i = 0; i < s->num_channels; i++) {
-        if ((s->ch_es[i] & ES_ERR) && (s->ch_csr[i] & CH_CSR_EEI)) {
+    for (unsigned int i = 0; i < s->num_channels; i++) {
+        if ((s->ch_es[i] & ES_ERR) &&
+            (s->ch_csr[i] & CH_CSR_EEI)) {
             active = true;
         }
     }
     qemu_set_irq(s->err_irq, active);
 }
 
-static void edma_record_error(IMXEDMAState *s, unsigned ch, uint32_t bits)
+static void edma_update_irqs(IMXEDMAState *s)
+{
+    unsigned int channel;
+
+    for (channel = 0; channel < s->num_channels; channel++) {
+        edma_update_ch_irq(s, channel);
+    }
+    edma_update_err_irq(s);
+}
+
+static void edma_record_error(IMXEDMAState *s, unsigned int ch, uint32_t bits)
 {
     qemu_log_mask(LOG_GUEST_ERROR, "imx.edma: channel %u error 0x%x\n",
                   ch, bits);
     s->ch_es[ch] = ES_ERR | bits;
     s->mp_es = (ch << 24) | bits;
+
+    /* HAE: halt the engine on error */
     if (s->mp_csr & MP_CSR_HAE) {
         s->mp_csr |= MP_CSR_HALT;
     }
     edma_update_err_irq(s);
 }
 
-static bool edma_req_level(IMXEDMAState *s, unsigned ch)
+static bool edma_req_level(IMXEDMAState *s, unsigned int ch)
 {
-    unsigned line;
+    unsigned int line;
 
+    /* eDMA3: line = channel; eDMA5: line selected by the mux */
     if (s->version == IMX_EDMA_V3) {
         line = ch;
     } else {
@@ -210,7 +225,7 @@ static bool edma_req_level(IMXEDMAState *s, unsigned ch)
     return s->req[line / 32] & BIT(line % 32);
 }
 
-static bool edma_runnable(IMXEDMAState *s, unsigned ch)
+static bool edma_runnable(IMXEDMAState *s, unsigned int ch)
 {
     uint16_t csr;
 
@@ -230,10 +245,10 @@ static int edma_pick(IMXEDMAState *s)
     int best = -1;
     uint32_t best_key = 0;
 
-    for (unsigned i = 0; i < s->num_channels; i++) {
-        unsigned ch = erca ? (s->rr_next + i) % s->num_channels
+    for (unsigned int i = 0; i < s->num_channels; i++) {
+        unsigned int ch = erca ? (s->rr_next + i) % s->num_channels
                            : s->num_channels - 1 - i;
-        unsigned apl = s->ch_pri[ch] & PRI_APL_MASK;
+        unsigned int apl = s->ch_pri[ch] & PRI_APL_MASK;
         uint32_t key;
 
         if (!edma_runnable(s, ch)) {
@@ -252,7 +267,7 @@ static int edma_pick(IMXEDMAState *s)
     return best;
 }
 
-static void edma_set_start(IMXEDMAState *s, unsigned ch)
+static void edma_set_start(IMXEDMAState *s, unsigned int ch)
 {
     uint8_t *t;
 
@@ -263,7 +278,7 @@ static void edma_set_start(IMXEDMAState *s, unsigned ch)
     stw_le_p(t, lduw_le_p(t) | TCD_CSR_START);
 }
 
-static void edma_minor_loop(IMXEDMAState *s, unsigned ch)
+static void edma_minor_loop(IMXEDMAState *s, unsigned int ch)
 {
     const struct IMXEDMATcdLayout *l = s->layout;
     uint8_t *t = edma_tcd(s, ch);
@@ -276,23 +291,23 @@ static void edma_minor_loop(IMXEDMAState *s, unsigned ch)
     uint64_t daddr = tcd_get_addr(l, t, l->daddr);
     int64_t soff = (int16_t)lduw_le_p(t + l->soff);
     int64_t doff = (int16_t)lduw_le_p(t + l->doff);
-    unsigned ssize = xfer_size[(attr >> 8) & 7];
-    unsigned dsize = xfer_size[attr & 7];
-    unsigned smod = (attr >> 11) & 0x1f;
-    unsigned dmod = (attr >> 3) & 0x1f;
+    unsigned int ssize = xfer_size[(attr >> 8) & 7];
+    unsigned int dsize = xfer_size[attr & 7];
+    unsigned int smod = (attr >> 11) & 0x1f;
+    unsigned int dmod = (attr >> 3) & 0x1f;
     bool smloe = nb_reg & TCD_NBYTES_SMLOE;
     bool dmloe = nb_reg & TCD_NBYTES_DMLOE;
     bool elink = citer & 0x8000;
-    unsigned iter_mask = elink ? 0x1ff : 0x7fff;
-    unsigned link_mask = l->a64 ? 0x3f : 0x1f;
-    unsigned tmc = l->a64 ? csr >> TCD_CSR_TMC_SHIFT : 0;
+    unsigned int iter_mask = elink ? 0x1ff : 0x7fff;
+    unsigned int link_mask = l->a64 ? 0x3f : 0x1f;
+    unsigned int tmc = l->a64 ? csr >> TCD_CSR_TMC_SHIFT : 0;
     uint32_t nbytes;
     int64_t mloff = 0;
     uint32_t err = 0;
     uint8_t buf[64];
     bool have_wo = false;
-    unsigned unit;
-    unsigned cnt;
+    unsigned int unit;
+    unsigned int cnt;
 
     if (smloe || dmloe) {
         nbytes = nb_reg & 0x3ff;
@@ -331,7 +346,7 @@ static void edma_minor_loop(IMXEDMAState *s, unsigned ch)
     unit = MAX(ssize, dsize);
     for (uint32_t done = 0; done < nbytes; done += unit) {
         /* Read one unit from the source, a transfer size at a time */
-        for (unsigned i = 0; i < unit; i += ssize) {
+        for (unsigned int i = 0; i < unit; i += ssize) {
             if (tmc == 2 && have_wo) {
                 break;          /* write-only mode: the source is read once */
             }
@@ -344,7 +359,7 @@ static void edma_minor_loop(IMXEDMAState *s, unsigned ch)
         }
         have_wo = true;
         /* Write it to the destination, a transfer size at a time */
-        for (unsigned i = 0; i < unit; i += dsize) {
+        for (unsigned int i = 0; i < unit; i += dsize) {
             if (tmc != 1 &&     /* read only mode: the data is discarded */
                 address_space_write(&s->dma_as, daddr, MEMTXATTRS_UNSPECIFIED,
                                     buf + i, dsize) != MEMTX_OK) {
@@ -442,7 +457,7 @@ out:
 static void edma_bh(void *opaque)
 {
     IMXEDMAState *s = opaque;
-    unsigned budget = 512;
+    unsigned int budget = 512;
 
     while (!(s->mp_csr & MP_CSR_HALT) && budget) {
         int ch = edma_pick(s);
@@ -478,11 +493,11 @@ static void edma_set_request(void *opaque, int n, int level)
     }
 }
 
-static uint32_t edma_channel_bits(IMXEDMAState *s, unsigned first, bool irq)
+static uint32_t edma_channel_bits(IMXEDMAState *s, unsigned int first, bool irq)
 {
     uint32_t v = 0;
 
-    for (unsigned i = 0; i < 32 && first + i < s->num_channels; i++) {
+    for (unsigned int i = 0; i < 32 && first + i < s->num_channels; i++) {
         bool b = irq ? (s->ch_int[first + i] & 1)
                      : edma_req_level(s, first + i);
 
@@ -494,7 +509,7 @@ static uint32_t edma_channel_bits(IMXEDMAState *s, unsigned first, bool irq)
 static uint32_t mp_read(IMXEDMAState *s, hwaddr off)
 {
     if (s->version == IMX_EDMA_V5) {
-        off &= 0xfff;   
+        off &= 0xfff;
     }
 
     switch (off) {
@@ -504,7 +519,7 @@ static uint32_t mp_read(IMXEDMAState *s, hwaddr off)
     case MP_ES: {
         uint32_t v = s->mp_es;
 
-        for (unsigned i = 0; i < s->num_channels; i++) {
+        for (unsigned int i = 0; i < s->num_channels; i++) {
             if (s->ch_es[i] & ES_ERR) {
                 v |= MP_ES_VLD;
             }
@@ -549,7 +564,7 @@ static void mp_write(IMXEDMAState *s, hwaddr off, uint32_t val, uint32_t wmask)
         return;
     case MP_STOPCH:
         if (s->version == IMX_EDMA_V5 && (val & wmask & 0xff)) {
-            unsigned ch = val & 0x3f;
+            unsigned int ch = val & 0x3f;
 
             if (ch < s->num_channels) {
                 if (val & BIT(7)) {
@@ -565,16 +580,16 @@ static void mp_write(IMXEDMAState *s, hwaddr off, uint32_t val, uint32_t wmask)
         break;
     }
     if (off >= MP_GRPRI && off < MP_GRPRI + 4 * s->num_channels) {
-        unsigned ch = (off - MP_GRPRI) / 4;
+        unsigned int ch = (off - MP_GRPRI) / 4;
 
         s->grpri[ch] = (s->grpri[ch] & ~(0x1f & wmask)) | (val & 0x1f & wmask);
         edma_kick(s);
     } else if (s->version == IMX_EDMA_V5 && off >= MP_MUX &&
                off < MP_MUX + 4 * s->num_channels) {
-        unsigned ch = (off - MP_MUX) / 4;
+        unsigned int ch = (off - MP_MUX) / 4;
         uint32_t src = val & 0x7f;
 
-        for (unsigned i = 0; src && i < s->num_channels; i++) {
+        for (unsigned int i = 0; src && i < s->num_channels; i++) {
             if (i != ch && s->mux[i] == src) {
                 src = 0;
             }
@@ -583,13 +598,13 @@ static void mp_write(IMXEDMAState *s, hwaddr off, uint32_t val, uint32_t wmask)
         edma_kick(s);
     } else if (s->version == IMX_EDMA_V5 && off >= MP_PROT &&
                off < MP_PROT + 4 * s->num_channels) {
-        unsigned ch = (off - MP_PROT) / 4;
+        unsigned int ch = (off - MP_PROT) / 4;
 
         s->prot[ch] = (s->prot[ch] & ~wmask) | (val & wmask);
     }
 }
 
-static uint32_t ch_read(IMXEDMAState *s, unsigned ch, hwaddr off)
+static uint32_t ch_read(IMXEDMAState *s, unsigned int ch, hwaddr off)
 {
     switch (off) {
     case CH_CSR:
@@ -609,7 +624,7 @@ static uint32_t ch_read(IMXEDMAState *s, unsigned ch, hwaddr off)
     }
 }
 
-static void ch_write(IMXEDMAState *s, unsigned ch, hwaddr off, uint32_t val,
+static void ch_write(IMXEDMAState *s, unsigned int ch, hwaddr off, uint32_t val,
                      uint32_t wmask)
 {
     uint32_t rw;
@@ -675,10 +690,10 @@ static bool edma_decode(IMXEDMAState *s, hwaddr off, unsigned *ch,
     return true;
 }
 
-static uint64_t edma_read(void *opaque, hwaddr off, unsigned size)
+static uint64_t edma_read(void *opaque, hwaddr off, unsigned int size)
 {
     IMXEDMAState *s = opaque;
-    unsigned ch;
+    unsigned int ch;
     hwaddr coff;
     uint32_t word;
 
@@ -690,7 +705,7 @@ static uint64_t edma_read(void *opaque, hwaddr off, unsigned size)
         const uint8_t *t = edma_tcd(s, ch) + (coff - CH_TCD);
         uint64_t v = 0;
 
-        for (unsigned i = 0; i < size && coff - CH_TCD + i < s->layout->size;
+        for (unsigned int i = 0; i < size && coff - CH_TCD + i < s->layout->size;
              i++) {
             v |= (uint64_t)t[i] << (8 * i);
         }
@@ -701,12 +716,12 @@ static uint64_t edma_read(void *opaque, hwaddr off, unsigned size)
     return (word >> (8 * (off & 3))) & MAKE_64BIT_MASK(0, size * 8);
 }
 
-static void edma_write(void *opaque, hwaddr off, uint64_t value, unsigned size)
+static void edma_write(void *opaque, hwaddr off, uint64_t value, unsigned int size)
 {
     IMXEDMAState *s = opaque;
-    unsigned ch;
+    unsigned int ch;
     hwaddr coff;
-    unsigned shift = 8 * (off & 3);
+    unsigned int shift = 8 * (off & 3);
     uint32_t wmask = MAKE_64BIT_MASK(0, size * 8) << shift;
     uint32_t val = (uint32_t)value << shift;
 
@@ -716,10 +731,10 @@ static void edma_write(void *opaque, hwaddr off, uint64_t value, unsigned size)
         return;
     } else if (coff >= CH_TCD && coff < CH_TCD + s->layout->size) {
         uint8_t *t = edma_tcd(s, ch);
-        unsigned o = coff - CH_TCD;
-        unsigned csr = s->layout->csr;
+        unsigned int o = coff - CH_TCD;
+        unsigned int csr = s->layout->csr;
 
-        for (unsigned i = 0; i < size && o + i < s->layout->size; i++) {
+        for (unsigned int i = 0; i < size && o + i < s->layout->size; i++) {
             t[o + i] = value >> (8 * i);
         }
         if (o < csr + 2 && o + size > csr) {
@@ -756,6 +771,8 @@ static void edma_reset(DeviceState *dev)
 {
     IMXEDMAState *s = IMX_EDMA(dev);
 
+    qemu_bh_cancel(s->bh);
+
     s->mp_csr = 0;
     s->mp_es = 0;
     s->rr_next = 0;
@@ -767,14 +784,12 @@ static void edma_reset(DeviceState *dev)
     memset(s->ch_pri, 0, sizeof(s->ch_pri));
     memset(s->ch_mattr, 0, sizeof(s->ch_mattr));
     memset(s->tcd, 0, sizeof(s->tcd));
-    for (unsigned i = 0; i < IMX_EDMA_MAX_CHANNELS; i++) {
+
+    for (unsigned int i = 0; i < IMX_EDMA_MAX_CHANNELS; i++) {
         s->ch_sbr[i] = 0x8007;
         s->prot[i] = 0x8007;
     }
-    for (unsigned i = 0; i < s->num_channels; i++) {
-        edma_update_ch_irq(s, i);
-    }
-    qemu_set_irq(s->err_irq, 0);
+    edma_update_irqs(s);
 }
 
 static void edma_realize(DeviceState *dev, Error **errp)
@@ -786,12 +801,14 @@ static void edma_realize(DeviceState *dev, Error **errp)
         error_setg(errp, "imx.edma: version must be 3 or 5");
         return;
     }
-    if (!s->num_channels || s->num_channels > IMX_EDMA_MAX_CHANNELS ||
+    if (!s->num_channels ||
+        s->num_channels > IMX_EDMA_MAX_CHANNELS ||
         (s->version == IMX_EDMA_V3 && s->num_channels > 32)) {
         error_setg(errp, "imx.edma: invalid number of channels");
         return;
     }
-    if (!s->num_requests || s->num_requests > IMX_EDMA_MAX_REQUESTS) {
+    if (!s->num_requests ||
+        s->num_requests > IMX_EDMA_MAX_REQUESTS) {
         error_setg(errp, "imx.edma: invalid number of requests");
         return;
     }
@@ -820,26 +837,39 @@ static void edma_realize(DeviceState *dev, Error **errp)
     address_space_init(&s->dma_as, s->dma_mr, "imx-edma-dma");
     s->bh = qemu_bh_new_guarded(edma_bh, s, &dev->mem_reentrancy_guard);
 
-    memory_region_init_io(&s->iomem, OBJECT(dev), &edma_ops, s, TYPE_IMX_EDMA,
-                          s->ch_base + (uint64_t)s->num_channels * s->ch_stride);
+    memory_region_init_io(&s->iomem, OBJECT(dev), &edma_ops, s,
+                          TYPE_IMX_EDMA,
+                          s->ch_base +
+                          (uint64_t)s->num_channels * s->ch_stride);
     sysbus_init_mmio(sbd, &s->iomem);
-    for (unsigned i = 0; i < (s->paired_irqs ? (s->num_channels + 1) / 2
+    for (unsigned int i = 0; i < (s->paired_irqs ? (s->num_channels + 1) / 2
                                               : s->num_channels); i++) {
         sysbus_init_irq(sbd, &s->ch_irq[i]);
     }
     sysbus_init_irq(sbd, &s->err_irq);
-    qdev_init_gpio_in_named(dev, edma_set_request, "dma-req", s->num_requests);
+    qdev_init_gpio_in_named(dev, edma_set_request, "dma-req",
+                            s->num_requests);
+}
+
+static void edma_unrealize(DeviceState *dev)
+{
+    IMXEDMAState *s = IMX_EDMA(dev);
+
+    qemu_bh_delete(s->bh);
+    s->bh = NULL;
+    address_space_destroy(&s->dma_as);
 }
 
 static int edma_post_load(void *opaque, int version_id)
 {
     IMXEDMAState *s = opaque;
 
-    for (unsigned i = 0; i < s->num_channels; i++) {
-        edma_update_ch_irq(s, i);
+    qemu_bh_cancel(s->bh);
+    edma_update_irqs(s);
+    if (!(s->mp_csr & MP_CSR_HALT) && edma_pick(s) >= 0) {
+        edma_kick(s);
     }
-    edma_update_err_irq(s);
-    edma_kick(s);
+
     return 0;
 }
 
@@ -855,7 +885,7 @@ static const VMStateDescription vmstate_imx_edma = {
         VMSTATE_UINT32_ARRAY(grpri, IMXEDMAState, IMX_EDMA_MAX_CHANNELS),
         VMSTATE_UINT32_ARRAY(mux, IMXEDMAState, IMX_EDMA_MAX_CHANNELS),
         VMSTATE_UINT32_ARRAY(prot, IMXEDMAState, IMX_EDMA_MAX_CHANNELS),
-        VMSTATE_UINT32_ARRAY(req, IMXEDMAState, IMX_EDMA_MAX_REQUESTS / 32),
+        VMSTATE_UINT32_ARRAY(req, IMXEDMAState, IMX_EDMA_REQUEST_WORDS),
         VMSTATE_UINT32_ARRAY(ch_csr, IMXEDMAState, IMX_EDMA_MAX_CHANNELS),
         VMSTATE_UINT32_ARRAY(ch_es, IMXEDMAState, IMX_EDMA_MAX_CHANNELS),
         VMSTATE_UINT32_ARRAY(ch_int, IMXEDMAState, IMX_EDMA_MAX_CHANNELS),
@@ -882,6 +912,7 @@ static void edma_class_init(ObjectClass *klass, const void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->realize = edma_realize;
+    dc->unrealize = edma_unrealize;
     device_class_set_legacy_reset(dc, edma_reset);
     dc->vmsd = &vmstate_imx_edma;
     dc->desc = "NXP i.MX eDMA3/eDMA5 controller";
@@ -901,3 +932,4 @@ static void edma_register_types(void)
 }
 
 type_init(edma_register_types)
+

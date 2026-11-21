@@ -8,7 +8,6 @@
 
 #include "qemu/osdep.h"
 #include "qemu/bitops.h"
-#include "qemu/error-report.h"
 #include "qemu/log.h"
 #include "qemu/guest-random.h"
 #include "system/address-spaces.h"
@@ -23,6 +22,11 @@
 
 typedef struct Imx95EleMuState Imx95EleMuState;
 
+static unsigned int imx95_ele_mu_reg_index(hwaddr offset)
+{
+    return offset / sizeof(uint32_t);
+}
+
 
 
 static uint32_t imx95_ele_mu_status(Imx95EleMuState *s,
@@ -30,7 +34,7 @@ static uint32_t imx95_ele_mu_status(Imx95EleMuState *s,
                                    hwaddr reg_offset)
 {
     hwaddr offset = block * IMX95_MU_BLOCK_SIZE + reg_offset;
-    uint32_t value = s->regs[offset / sizeof(uint32_t)];
+    uint32_t value = s->regs[imx95_ele_mu_reg_index(offset)];
 
     switch (reg_offset) {
     case IMX95_MU_TSR_OFFSET:
@@ -106,13 +110,14 @@ static void imx95_ele_mu_queue_response(Imx95EleMuState *s)
                   "size=%u cmd=0x%02x tag=0x%02x\n",
                   hdr, ver, size, cmd, tag);
 
+    /* Known commands are answered, others get a generic success */
     s->rx_count = 0;
     s->rx_pos = 0;
 
     switch (cmd) {
     case ELE_ENABLE_AUX_REQ:
-        s->rx_words[0] = ((uint32_t) ELE_MSG_TAG_RESP << 24) |
-                         ((uint32_t) cmd << 16) |
+        s->rx_words[0] = ((uint32_t)ELE_MSG_TAG_RESP << 24) |
+                         ((uint32_t)cmd << 16) |
                          (2U << 8) |
                          ELE_MSG_VER;
 
@@ -254,8 +259,12 @@ static void imx95_ele_mu_queue_response(Imx95EleMuState *s)
         uint8_t random_data[ELE_GET_RANDOM_MAX_BYTES];
         MemTxResult result;
 
-        random_addr = ((uint64_t)s->tx_words[1] << 32) |
-                      (uint64_t)s->tx_words[2];
+        /*
+         * word 1: reserved half-word and the flags
+         * word 2: 32-bit destination address
+         * word 3: length.
+         */
+        random_addr = s->tx_words[2];
         requested_bytes = s->tx_words[3];
         returned_bytes = MIN(requested_bytes,
                              (uint32_t)ELE_GET_RANDOM_MAX_BYTES);
@@ -291,8 +300,8 @@ static void imx95_ele_mu_queue_response(Imx95EleMuState *s)
 
 
     default:
-        s->rx_words[0] = ((uint32_t) ELE_MSG_TAG_RESP << 24) |
-                         ((uint32_t) cmd << 16) |
+        s->rx_words[0] = ((uint32_t)ELE_MSG_TAG_RESP << 24) |
+                         ((uint32_t)cmd << 16) |
                          (2U << 8) |
                          ELE_MSG_VER;
         s->rx_words[1] = ELE_SUCCESS_IND;
@@ -318,7 +327,7 @@ static uint64_t imx95_ele_mu_read(void *opaque, hwaddr offset, unsigned size)
         return 0;
     }
 
-    value = s->regs[offset / 4];
+    value = s->regs[imx95_ele_mu_reg_index(offset)];
 
  if (block_off == IMX95_MU_PAR_OFFSET) {
  return IMX95_MU_PAR_4TR_4RR;
@@ -380,7 +389,7 @@ static void imx95_ele_mu_write(void *opaque, hwaddr offset,
         return;
     }
 
-    s->regs[offset / 4] = value;
+    s->regs[imx95_ele_mu_reg_index(offset)] = value;
 
     if (block_off == IMX95_MU_TCR_OFFSET ||
         block_off == IMX95_MU_RCR_OFFSET) {
@@ -396,7 +405,7 @@ static void imx95_ele_mu_write(void *opaque, hwaddr offset,
     if (block_off >= IMX95_MU_TR_OFFSET &&
         block_off < IMX95_MU_TR_OFFSET + 0x10) {
        uint32_t idx = (block_off - IMX95_MU_TR_OFFSET) / 4;
-        uint32_t word = (uint32_t) value;
+        uint32_t word = (uint32_t)value;
 
 	uint32_t expected_idx;
 	qemu_log_mask(LOG_GUEST_ERROR,
@@ -539,6 +548,7 @@ static void imx95_ele_mu_reset(DeviceState *dev)
     memset(s->fuse, 0, sizeof(s->fuse));
     s->fuse[IMX95_ELE_FUSE_WORD_NPU_A55] = s->fuse_npu_a55;
     s->fuse[IMX95_ELE_FUSE_WORD_FEATURES] = s->fuse_features;
+    s->fuse[IMX95_ELE_FUSE_WORD_BOOT_CFG8] = s->fuse_boot_cfg8;
     s->ca55_masked = false;
     s->mu3_irq_level = false;
     qemu_set_irq(s->mu3_irq, 0);
@@ -559,16 +569,29 @@ static void imx95_ele_mu_init(Object *obj)
                             "ca55-irq-mask", 1);
 }
 
+static int imx95_ele_mu_post_load(void *opaque, int version_id)
+{
+    Imx95EleMuState *s = opaque;
+
+    imx95_ele_mu_update_mu3_irq(s);
+
+    return 0;
+}
+
 static const VMStateDescription vmstate_imx95_ele_mu = {
     .name = TYPE_IMX95_ELE_MU,
     .version_id = 2,
     .minimum_version_id = 1,
+    .post_load = imx95_ele_mu_post_load,
     .fields = (const VMStateField[]) {
-        VMSTATE_UINT32_ARRAY(regs, Imx95EleMuState, IMX95_ELE_MU_SIZE / 4),
-        VMSTATE_UINT32_ARRAY(tx_words, Imx95EleMuState, 8),
+        VMSTATE_UINT32_ARRAY(regs, Imx95EleMuState,
+                             IMX95_ELE_MU_REG_COUNT),
+        VMSTATE_UINT32_ARRAY(tx_words, Imx95EleMuState,
+                             IMX95_ELE_MSG_MAX_WORDS),
         VMSTATE_UINT32(tx_count, Imx95EleMuState),
         VMSTATE_UINT32(tx_expected, Imx95EleMuState),
-        VMSTATE_UINT32_ARRAY(rx_words, Imx95EleMuState, 8),
+        VMSTATE_UINT32_ARRAY(rx_words, Imx95EleMuState,
+                             IMX95_ELE_MSG_MAX_WORDS),
         VMSTATE_UINT32(rx_count, Imx95EleMuState),
         VMSTATE_UINT32(rx_pos, Imx95EleMuState),
         VMSTATE_UINT32(active_block, Imx95EleMuState),
@@ -582,6 +605,7 @@ static const VMStateDescription vmstate_imx95_ele_mu = {
 static const Property imx95_ele_mu_props[] = {
     DEFINE_PROP_UINT32("fuse-npu-a55", Imx95EleMuState, fuse_npu_a55, 0),
     DEFINE_PROP_UINT32("fuse-features", Imx95EleMuState, fuse_features, 0),
+    DEFINE_PROP_UINT32("fuse-boot-cfg8", Imx95EleMuState, fuse_boot_cfg8, 0),
 };
 
 static void imx95_ele_mu_class_init(ObjectClass *oc, const void *data)
@@ -592,7 +616,7 @@ static void imx95_ele_mu_class_init(ObjectClass *oc, const void *data)
 
     device_class_set_legacy_reset(dc, imx95_ele_mu_reset);
     dc->vmsd = &vmstate_imx95_ele_mu;
-    dc->desc = "i.MX95 ele mu";
+    dc->desc = "i.MX95 ELE MU";
 }
 
 static const TypeInfo imx95_ele_mu_types[] = {
@@ -606,3 +630,4 @@ static const TypeInfo imx95_ele_mu_types[] = {
 };
 
 DEFINE_TYPES(imx95_ele_mu_types)
+

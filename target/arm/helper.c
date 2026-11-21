@@ -2975,6 +2975,7 @@ static void vmsa_tcr_el12_write(CPUARMState *env, const ARMCPRegInfo *ri,
     raw_write(env, ri, value);
 }
 
+/* True for a KPTI view switch: ASID differs only in bit 0, base changes */
 static bool ttbr1_kpti_view_switch(uint64_t oldv, uint64_t newv,
                                    bool asid_in_ttbr1)
 {

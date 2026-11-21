@@ -10,9 +10,8 @@
 #define HW_MISC_IMX95_WDOG32_H
 
 #include "hw/core/sysbus.h"
-#include "qom/object.h"
 
-#define IMX95_WDOG_SIZE  0x10000
+#define IMX95_WDOG_SIZE 0x10000
 
 
 #define TYPE_IMX95_WDOG32 "imx95.wdog32"
@@ -30,3 +29,4 @@ struct Imx95Wdog32State {
 };
 
 #endif /* HW_MISC_IMX95_WDOG32_H */
+

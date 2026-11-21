@@ -58,7 +58,12 @@ enum FslImx95Configuration {
     FSL_IMX95_NUM_LPI2CS       = 8,
     FSL_IMX95_NUM_LPUARTS      = 2,    /* SM debug, Cortex-A55 console */
     FSL_IMX95_NUM_USDHCS       = 3,
-    FSL_IMX95_NUM_EDMAS        = 3,    /* AON eDMA3, WAKEUP eDMA5_2 and eDMA5_3 */
+    FSL_IMX95_NUM_EDMAS        = 3,
+    FSL_IMX95_NUM_AON_MUS      = 2,
+    FSL_IMX95_NUM_PCIES        = 2,
+    FSL_IMX95_NUM_GPIOS        = 5,
+    FSL_IMX95_NUM_WDOGS        = 4,
+    FSL_IMX95_NUM_TPMS         = 2,
     FSL_IMX95_NUM_IRQS         = 384,
     FSL_IMX95_M33_NUM_IRQS     = 376,
 };
@@ -77,7 +82,7 @@ struct FslImx95State {
     Clock          *m7_cpuclk;
     Clock          *m7_refclk;
 
-    IMX95MUState    aon_mu[2];
+    IMX95MUState    aon_mu[FSL_IMX95_NUM_AON_MUS];
     IMX95MUState    wakeup_mu;
     IMX95MUState    m7_mu;
     MemoryRegion    m7_mu_sram;
@@ -89,14 +94,14 @@ struct FslImx95State {
     SDHCIState      usdhc[FSL_IMX95_NUM_USDHCS];
     USBDWC3         usb1;
     ChipideaState   usb2;
-    Imx95PcieHost pcie[2];        /* PCIe0 and PCIe1 */
+    Imx95PcieHost   pcie[FSL_IMX95_NUM_PCIES];
 
     MemoryRegion    m33_code_tcm;
     MemoryRegion    m33_data_tcm;
     MemoryRegion    a55_ocram;
     MemoryRegion    ddrmix;
-    MemoryRegion    aon_mu_sram[2];
-    MemoryRegion    aon_mu_sram_b_alias[2];
+    MemoryRegion    aon_mu_sram[FSL_IMX95_NUM_AON_MUS];
+    MemoryRegion    aon_mu_sram_b_alias[FSL_IMX95_NUM_AON_MUS];
     MemoryRegion    lpuart_a55_alias;
     MemoryRegion    m7_itcm;
     MemoryRegion    m7_dtcm;
@@ -109,8 +114,8 @@ struct FslImx95State {
 
     Imx95CcmState ccm;
     Imx95SysctrState sysctr;
-    Imx95PcieSerdesSsState pcie_serdes[2];
-    Imx95NetcEcamState netc_ecam[2];
+    Imx95PcieSerdesSsState pcie_serdes[FSL_IMX95_NUM_PCIES];
+    Imx95NetcEcamState netc_ecam[FSL_IMX95_NUM_PCIES];
     Imx95HsioBlkCtrlState hsio_blk_ctrl;
     Imx95CameraCsrState camera_csr;
     Imx95CameraNocState camera_noc;
@@ -130,11 +135,11 @@ struct FslImx95State {
 
     Imx95AdcState adc;
 
-    Imx95GpioState gpio[5];
+    Imx95GpioState gpio[FSL_IMX95_NUM_GPIOS];
 
-    Imx95Wdog32State wdog[4];
+    Imx95Wdog32State wdog[FSL_IMX95_NUM_WDOGS];
 
-    Imx95TpmPwmState tpm[2];
+    Imx95TpmPwmState tpm[FSL_IMX95_NUM_TPMS];
 
     Imx95BlkCtrlSAonmixState blk_ctrl_aonmix;
     Imx95EleMuState ele_mu;
@@ -143,10 +148,13 @@ struct FslImx95State {
 
 };
 
+I2CBus *fsl_imx95_get_i2c_bus(FslImx95State *s, unsigned int index);
+BusState *fsl_imx95_get_usdhc_bus(FslImx95State *s, unsigned int index);
+
 enum FslImx95Irqs {
     FSL_IMX95_LPUART_SM_IRQ         = 19,
     FSL_IMX95_LPUART_M7_IRQ         = 64,
-    FSL_IMX95_SYSCTR_IRQ            = 72, 
+    FSL_IMX95_SYSCTR_IRQ            = 72,
     FSL_IMX95_LPUART_A55_IRQ        = 19,
     FSL_IMX95_LPI2C1_IRQ            = 13,
     FSL_IMX95_LPI2C2_IRQ            = 14,
@@ -186,13 +194,13 @@ enum FslImx95Irqs {
 };
 
 enum FslImx95Edmas {
-    FSL_IMX95_EDMA_AON,       
-    FSL_IMX95_EDMA_WAKEUP2,  
+    FSL_IMX95_EDMA_AON,
+    FSL_IMX95_EDMA_WAKEUP2,
     FSL_IMX95_EDMA_WAKEUP3,
 };
 
 enum FslImx95DmaRequests {
-    FSL_IMX95_DMAREQ_LPI2C1_TX = 12, 
+    FSL_IMX95_DMAREQ_LPI2C1_TX = 12,
     FSL_IMX95_DMAREQ_LPI2C1_RX = 13,
     FSL_IMX95_DMAREQ_LPI2C2_TX = 14,
     FSL_IMX95_DMAREQ_LPI2C2_RX = 15,
@@ -336,3 +344,4 @@ enum FslImx95MemoryRegions {
 
 
 #endif /* FSL_IMX95_H */
+

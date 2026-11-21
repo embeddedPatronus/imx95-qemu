@@ -12,6 +12,7 @@
 #include "system/memory.h"
 #include "hw/misc/imx95_camera_noc.h"
 
+/* Only the QoS generator registers (block base + 0x18) are modelled */
 static const hwaddr imx95_camera_noc_qosgen[IMX95_CAMERA_NOC_NUM_QOSGEN] = {
     0xc80 + 0x18,   /* ISI_WR_U */
     0xd00 + 0x18,   /* ISI_WR_V */

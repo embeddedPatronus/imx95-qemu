@@ -39,7 +39,11 @@
 #define IMX95_BLK_CTRL_NUM_A55          6
 
 #define TYPE_IMX95_BLK_CTRL_S_AONMIX "imx95.blk-ctrl-s-aonmix"
-OBJECT_DECLARE_SIMPLE_TYPE(Imx95BlkCtrlSAonmixState, IMX95_BLK_CTRL_S_AONMIX)
+OBJECT_DECLARE_SIMPLE_TYPE(Imx95BlkCtrlSAonmixState,
+                           IMX95_BLK_CTRL_S_AONMIX)
+
+uint32_t imx95_blk_ctrl_s_aonmix_get_m7_initvtor(
+    Imx95BlkCtrlSAonmixState *s);
 
 typedef struct Imx95A55Ctx {
     Imx95BlkCtrlSAonmixState *s;
@@ -57,13 +61,17 @@ struct Imx95BlkCtrlSAonmixState {
     bool m7_run_level;
     uint32_t m7_initvtor;
 
+    uint32_t num_a55;            /* number of a55 cores */
+    uint32_t ele_irq_mask_bit;   /* CA55_IRQ_MASK0 bit that gates the ELE MU3 irq */
+    uint32_t ca55_mode_reset;    /* reset value of CA55_MODE */
+
     bool a55_released;
     bool a55_secondary_released[IMX95_BLK_CTRL_NUM_A55];
 
     Imx95A55Ctx a55_ctx[IMX95_BLK_CTRL_NUM_A55];
     bool a55_want_on[IMX95_BLK_CTRL_NUM_A55];
     uint64_t a55_want_entry[IMX95_BLK_CTRL_NUM_A55];
-    uint32_t a55_want_gen[IMX95_BLK_CTRL_NUM_A55]; 
+    uint32_t a55_want_gen[IMX95_BLK_CTRL_NUM_A55];
     uint32_t a55_run_gen[IMX95_BLK_CTRL_NUM_A55];
     bool a55_op_pending[IMX95_BLK_CTRL_NUM_A55];
 
@@ -72,3 +80,4 @@ struct Imx95BlkCtrlSAonmixState {
 };
 
 #endif /* HW_MISC_IMX95_BLK_CTRL_S_AONMIX_H */
+

@@ -105,7 +105,7 @@ bcm2838_pcie_host_write(unsigned int size, uint64_t offset, uint64_t value) "%u 
 imx95_container_set(unsigned version) "container-set version %u"
 imx95_container_header(unsigned index, uint64_t offset, unsigned version, unsigned tag, uint32_t length, unsigned images) "container %u off=0x%"PRIx64" version=%u tag=0x%02x length=0x%x images=%u"
 imx95_container_image(unsigned container, unsigned image, uint64_t offset, uint32_t size, uint64_t load, uint64_t entry, uint32_t flags) "image c%u.i%u off=0x%"PRIx64" size=0x%x load=0x%"PRIx64" entry=0x%"PRIx64" flags=0x%08x"
-imx95_container_secondary_set(uint64_t offset, unsigned version, unsigned tag, uint32_t length, unsigned images) "secondary container set off=0x%"PRIx64" version=%u tag=0x%02x length=0x%x images=%u"
+imx95_container_probe(uint64_t offset, bool valid, unsigned oem_sw, bool nxp, unsigned nxp_sw, uint64_t end) "container set at 0x%"PRIx64": valid=%d oem_sw_version=%u nxp=%d nxp_sw_version=%u end=0x%"PRIx64
 
 # imx95-bootrom.c
 imx95_bootrom_source(const char *source) "boot source: %s"
@@ -113,5 +113,7 @@ imx95_bootrom_image(const char *what, unsigned container, unsigned image, uint64
 imx95_bootrom_no_spl(void) "no Cortex-A55 SPL image found"
 imx95_bootrom_not_container(const char *why) "not a container set (%s), loading as a raw System Manager image"
 imx95_bootrom_raw_sm(const char *file, uint64_t addr, int64_t size) "raw SM image '%s' at 0x%"PRIx64", %"PRId64" bytes"
-imx95_bootrom_no_handover(bool spl, bool secondary) "no ROM handover (spl=%d, secondary set valid=%d)"
-imx95_bootrom_handover(uint64_t entry, uint32_t flags, uint32_t secondary_offset) "ROM handover: a55c0 entry=0x%"PRIx64" flags=0x%08x secondary set at 0x%08x"
+imx95_bootrom_snd_offset(uint32_t fuse, bool enabled, uint64_t offset) "Secondary_boot_offset fuse=%u: 2nd set enabled=%d, offset 0x%"PRIx64
+imx95_bootrom_set_select(unsigned set, const char *why) "boot image set %u is the primary set (%s)"
+imx95_bootrom_no_handover(void) "no ROM handover: no Cortex-A55 SPL was loaded"
+imx95_bootrom_handover(uint64_t entry, uint32_t flags, unsigned set, uint32_t set_offset, uint32_t set_end) "ROM handover: a55c0 entry=0x%"PRIx64" flags=0x%08x image set %u at 0x%08x, end 0x%08x"

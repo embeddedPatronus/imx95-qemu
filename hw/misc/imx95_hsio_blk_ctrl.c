@@ -22,6 +22,7 @@ typedef struct {
 #define QOS_MASK        0x00000707u   /* AR_QOS [10:8], AW_QOS [2:0] */
 #define WAKEUP_CTRL     0x8001ff3fu   /* [31], [16:8], [5:0] */
 
+/* Reset value and writable mask per register */
 static const Imx95HsioReg imx95_hsio_regs[] = {
     { 0x00, 0x00000023, 0x000001e3, "GPR_REG0" },
     { 0x10, 0x00000000, WAKEUP_CTRL, "USB1_WAKEUP_CTRL" },

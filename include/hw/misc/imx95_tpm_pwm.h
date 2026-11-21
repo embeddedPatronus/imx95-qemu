@@ -12,7 +12,10 @@
 #include "hw/core/sysbus.h"
 #include "qom/object.h"
 
-#define IMX95_TPM_PWM_SIZE              0x00010000
+#define IMX95_TPM_PWM_SIZE          0x00010000
+#define IMX95_TPM_CHANNEL_COUNT     8
+#define IMX95_TPM_REGISTER_COUNT    \
+    (IMX95_TPM_PWM_SIZE / sizeof(uint32_t))
 
 
 #define TYPE_IMX95_TPM_PWM "imx95.tpm-pwm"
@@ -22,7 +25,8 @@ struct Imx95TpmPwmState {
     SysBusDevice parent_obj;
 
     MemoryRegion iomem;
-    uint32_t regs[IMX95_TPM_PWM_SIZE / sizeof(uint32_t)];
+    uint32_t regs[IMX95_TPM_REGISTER_COUNT];
 };
 
 #endif /* HW_MISC_IMX95_TPM_PWM_H */
+

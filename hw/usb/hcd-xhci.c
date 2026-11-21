@@ -3132,6 +3132,7 @@ static void xhci_runtime_write(void *ptr, hwaddr reg,
         } else {
             intr->erstba_low = val & 0xffffffc0;
         }
+        /* Set up the event ring once both ERSTBA halves are written */
         if (intr->erstba_first == 2) {
             intr->erstba_first = 0;
             xhci_er_reset(xhci, v);

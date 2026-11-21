@@ -352,16 +352,34 @@ sudo apt install \
 -- Fetch this repository
 
 git clone https://github.com/embeddedPatronus/imx95-qemu.git
+
 cd imx95-qemu
 
--- configure the build
 
-Create a separate build directory and configure QEMU for AArch64 system emulation:
+-- configure the build and compile qemu emulation
 
-mkdir build
-cd build
+1. Create a separate build directory and configure QEMU for AArch64 system emulation:
 
-../configure --target-list=aarch64-softmmu
+mkdir build && cd build
+
+2. Create a brand-new, isolated virtual environment inside your workspace
+
+/usr/bin/python3.12 -m venv my_clean_env --without-pip
+
+3. Explicitly activate it
+
+source my_clean_env/bin/activate
+
+4. Bootstrap a working, Python 3.12-compatible version of pip and setuptools inside it
+
+python -m ensurepip --upgrade
+
+5. Run QEMU configure using this newly created, functional Python binary path
+
+../configure --target-list=aarch64-softmmu --python=$(which python)
+
+6. Run make
+
 make -j$(nproc)
 
 ============================
@@ -370,12 +388,14 @@ Running iMX95 Qemu emulation
 
 cd build
 
-./qemu-system-aarch64 -M imx95-evk -drive if=sd,index=0,file=<path_of .wic>,format=raw -display none  -serial pty -serial stdio
+./qemu-system-aarch64 -M imx95-evk -drive if=sd,index=0,file=<path_of .wic>,format=raw -display none  -serial pty -serial stdio -serial pty
 
 
 -- Expected logs:-
 
 char device redirected to /dev/pts/11 (label serial0)
+
+char device redirected to /dev/pts/12 (label serial1)
 
 U-Boot SPL 2026.04-lf_v2026.04+g6eeef838dac+p0 (Jun 02 2026 - 15:03:39 +0000)
 SYS Boot reason: por, origin: -1, errid: -1
@@ -398,9 +418,9 @@ Model: NXP i.MX95 19X19 board
 
 
 
-The example command configures two serial consoles:
+The example command configures 3 serial consoles:
 
-"-serial pty -serial stdio"
+"-serial pty -serial stdio -serial pty"
 The serial ports are assigned as follows:
 
 Serial option 	                        Console
@@ -408,8 +428,6 @@ First serial port, -serial pty	        Cortex-M33 System Manager debug console
 Second serial port, -serial stdio	Cortex-A55 firmware and Linux console
 Third serial port, -serial pty	        Cortex-M7 console (optional, only when the boot medium has a Cortex-M7 image)
 
-To use the Cortex-M7 console, add a third serial option, for example "-serial pty -serial stdio -serial pty",
-and open the pseudo-terminal that QEMU reports for the third port (label serial2).
 
 When QEMU starts, it prints the pseudo-terminal allocated to the System Manager console. Example:
 
@@ -419,7 +437,7 @@ To access the SM console on another tab:-
 
 screen /dev/pts/11
 
-You can therefore observe both processing domains at the same time:
+You can therefore observe the 3 processing domains at the same time:
 
 Terminal 1
     Cortex-A55 console
@@ -429,6 +447,8 @@ Terminal 2
     Cortex-M33 System Manager console
     System Manager logs and interactive commands
 
+Terminal 3
+    Cortex-M7 console
 
 
     
@@ -475,18 +495,3 @@ current development version that is available at
 folder in the source tree, and is built by `Sphinx
 <https://www.sphinx-doc.org/en/master/>`_.
 
-
-Building
-========
-
-QEMU is multi-platform software intended to be buildable on all modern
-Linux platforms, OS-X, Win32 (via the Mingw64 toolchain) and a variety
-of other UNIX targets. The simple steps to build QEMU are:
-
-
-.. code-block:: shell
-
-  mkdir build
-  cd build
-  ../configure
-  make

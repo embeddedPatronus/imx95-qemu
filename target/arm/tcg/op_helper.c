@@ -381,6 +381,7 @@ void HELPER(wfi)(CPUARMState *env, uint32_t insn_len)
     uint32_t excp;
     int target_el = check_wfx_trap(env, false, &excp);
 
+    /* Power-down WFI: power the core off and signal the power controller */
     if (!target_el && (env->cp15.impdef_regs[ARM_IMPDEF_A55_CPUPWRCTLR] & 1)) {
         ARMCPU *pcpu = env_archcpu(env);
 

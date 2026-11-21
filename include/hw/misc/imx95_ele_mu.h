@@ -12,7 +12,9 @@
 #include "hw/core/sysbus.h"
 #include "qom/object.h"
 
-#define IMX95_ELE_MU_SIZE 0x80000
+#define IMX95_ELE_MU_SIZE       0x80000
+#define IMX95_ELE_MU_REG_COUNT  (IMX95_ELE_MU_SIZE / sizeof(uint32_t))
+#define IMX95_ELE_MSG_MAX_WORDS 8
 
 #define ELE_MSG_VER      0x06
 #define ELE_MSG_TAG_RESP 0xe1
@@ -26,8 +28,9 @@
 #define IMX95_ELE_NUM_FUSES 610U
 #define IMX95_FSB_SIZE        0x10000U
 #define IMX95_FSB_FUSE_OFFSET 0x8000U
-#define IMX95_ELE_FUSE_WORD_NPU_A55   18U 
+#define IMX95_ELE_FUSE_WORD_NPU_A55   18U
 #define IMX95_ELE_FUSE_WORD_FEATURES  19U
+#define IMX95_ELE_FUSE_WORD_BOOT_CFG8 32U
 #define ELE_GET_V2X_FW_STATE_REQ 0xb2
 #define ELE_TRNG_STATE_REQ 0xa4
 #define ELE_GET_RANDOM_REQ 0xcd
@@ -52,13 +55,13 @@ struct Imx95EleMuState {
 
     MemoryRegion iomem;
     MemoryRegion fsb;           /* mmio 1: the fuse shadow block */
-    uint32_t regs[IMX95_ELE_MU_SIZE / 4];
+    uint32_t regs[IMX95_ELE_MU_REG_COUNT];
 
-    uint32_t tx_words[8];
+    uint32_t tx_words[IMX95_ELE_MSG_MAX_WORDS];
     uint32_t tx_count;
     uint32_t tx_expected;
 
-    uint32_t rx_words[8];
+    uint32_t rx_words[IMX95_ELE_MSG_MAX_WORDS];
     uint32_t rx_count;
     uint32_t rx_pos;
     unsigned int active_block;
@@ -66,6 +69,7 @@ struct Imx95EleMuState {
     uint32_t fuse[IMX95_ELE_NUM_FUSES];
     uint32_t fuse_npu_a55;      /* property: word 18 */
     uint32_t fuse_features;     /* property: word 19 */
+    uint32_t fuse_boot_cfg8;    /* property: word 32 */
 
     qemu_irq mu3_irq;
     bool ca55_masked;
@@ -73,3 +77,4 @@ struct Imx95EleMuState {
 };
 
 #endif /* HW_MISC_IMX95_ELE_MU_H */
+

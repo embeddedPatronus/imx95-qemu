@@ -10,7 +10,6 @@
 #include "hw/i2c/imx_lpi2c.h"
 #include "hw/core/irq.h"
 #include "migration/vmstate.h"
-#include "qemu/log.h"
 #include "qemu/module.h"
 
 /* Register offsets */
@@ -41,6 +40,7 @@
 #define LPI2C_MFCR_RXWATER_MASK  0x7
 
 #define LPI2C_FIFO_WORDS  8
+#define LPI2C_VERID_VALUE 0x00010000
 #define LPI2C_PARAM_VALUE 0x00000303
 
 /* MCR bits */
@@ -86,21 +86,22 @@
 
 static void imx_lpi2c_master_reset(IMXLPI2CState *s);
 
-static unsigned imx_lpi2c_rx_count(IMXLPI2CState *s)
+static unsigned int imx_lpi2c_rx_count(const IMXLPI2CState *s)
 {
     return s->rx_len - s->rx_pos;
 }
 
-static unsigned imx_lpi2c_rx_water(IMXLPI2CState *s)
+static unsigned int imx_lpi2c_rx_water(const IMXLPI2CState *s)
 {
     return (s->regs[LPI2C_MFCR / 4] >> LPI2C_MFCR_RXWATER_SHIFT) &
            LPI2C_MFCR_RXWATER_MASK;
 }
 
-static uint32_t imx_lpi2c_msr_value(IMXLPI2CState *s)
+static uint32_t imx_lpi2c_msr_value(const IMXLPI2CState *s)
 {
     uint32_t msr = s->regs[LPI2C_MSR / 4];
 
+    /* The transmit FIFO never fills, so TDF is always set */
     msr |= LPI2C_MSR_TDF;
 
     if (imx_lpi2c_rx_count(s) > imx_lpi2c_rx_water(s)) {
@@ -112,31 +113,46 @@ static uint32_t imx_lpi2c_msr_value(IMXLPI2CState *s)
     return msr;
 }
 
-static void imx_lpi2c_update_irq(IMXLPI2CState *s)
+static bool imx_lpi2c_tx_dma_level(const IMXLPI2CState *s)
 {
-    uint32_t mder = s->regs[LPI2C_MDER / 4];
-    bool tx = mder & LPI2C_MDER_TDDE;
-    bool rx = (mder & LPI2C_MDER_RDDE) &&
-              imx_lpi2c_rx_count(s) > imx_lpi2c_rx_water(s);
+    return s->regs[LPI2C_MDER / 4] & LPI2C_MDER_TDDE;
+}
+
+static bool imx_lpi2c_rx_dma_level(const IMXLPI2CState *s)
+{
+    return (s->regs[LPI2C_MDER / 4] & LPI2C_MDER_RDDE) &&
+           imx_lpi2c_rx_count(s) > imx_lpi2c_rx_water(s);
+}
+
+static void imx_lpi2c_update_outputs(IMXLPI2CState *s, bool force)
+{
+    bool tx = imx_lpi2c_tx_dma_level(s);
+    bool rx = imx_lpi2c_rx_dma_level(s);
 
     qemu_set_irq(s->irq, (imx_lpi2c_msr_value(s) &
                           s->regs[LPI2C_MIER / 4]) != 0);
 
-    if (tx != s->tx_req) {
+    if (force || tx != s->tx_req) {
         s->tx_req = tx;
         qemu_set_irq(s->tx_dma_req, tx);
     }
-    if (rx != s->rx_req) {
+    if (force || rx != s->rx_req) {
         s->rx_req = rx;
         qemu_set_irq(s->rx_dma_req, rx);
     }
+}
+
+static void imx_lpi2c_update_irq(IMXLPI2CState *s)
+{
+    imx_lpi2c_update_outputs(s, false);
 }
 
 static void imx_lpi2c_do_stop(IMXLPI2CState *s)
 {
     i2c_end_transfer(s->bus);
     s->stop_pending = false;
-    s->regs[LPI2C_MSR / 4] |= LPI2C_MSR_TDF | LPI2C_MSR_SDF | LPI2C_MSR_EPF;
+    s->regs[LPI2C_MSR / 4] |= LPI2C_MSR_TDF | LPI2C_MSR_SDF |
+                                 LPI2C_MSR_EPF;
     s->regs[LPI2C_MSR / 4] &= ~LPI2C_MSR_BUSY_MASK;
 }
 
@@ -145,9 +161,11 @@ static void imx_lpi2c_fill_rx(IMXLPI2CState *s)
     if (s->rx_pos == s->rx_len) {
         s->rx_pos = s->rx_len = 0;
     }
-    while (s->rx_pending && imx_lpi2c_rx_count(s) < LPI2C_FIFO_WORDS) {
+    while (s->rx_pending &&
+           imx_lpi2c_rx_count(s) < LPI2C_FIFO_WORDS) {
         if (s->rx_len == sizeof(s->rx_fifo)) {
-            memmove(s->rx_fifo, s->rx_fifo + s->rx_pos, imx_lpi2c_rx_count(s));
+            memmove(s->rx_fifo, s->rx_fifo + s->rx_pos,
+                    imx_lpi2c_rx_count(s));
             s->rx_len -= s->rx_pos;
             s->rx_pos = 0;
         }
@@ -188,7 +206,8 @@ static void imx_lpi2c_master_reset(IMXLPI2CState *s)
     imx_lpi2c_update_irq(s);
 }
 
-static uint64_t imx_lpi2c_read(void *opaque, hwaddr offset, unsigned size)
+static uint64_t imx_lpi2c_read(void *opaque, hwaddr offset,
+                                 unsigned int size)
 {
     IMXLPI2CState *s = opaque;
 
@@ -240,7 +259,8 @@ static void imx_lpi2c_write(void *opaque, hwaddr offset,
 
     case LPI2C_MTDR:
     {
-        uint32_t cmd = (v & LPI2C_MTDR_CMD_MASK) >> LPI2C_MTDR_CMD_SHIFT;
+        uint32_t cmd = (v & LPI2C_MTDR_CMD_MASK) >>
+                       LPI2C_MTDR_CMD_SHIFT;
         uint32_t data = v & LPI2C_MTDR_DATA_MASK;
         int ret;
 
@@ -259,7 +279,8 @@ static void imx_lpi2c_write(void *opaque, hwaddr offset,
 
             ret = i2c_start_transfer(s->bus, data >> 1, data & 1);
             if (ret) {
-                s->regs[LPI2C_MSR / 4] |= LPI2C_MSR_NDF | LPI2C_MSR_BUSY_MASK;
+                s->regs[LPI2C_MSR / 4] |= LPI2C_MSR_NDF |
+                                             LPI2C_MSR_BUSY_MASK;
             } else {
                 s->regs[LPI2C_MSR / 4] &= ~LPI2C_MSR_NDF;
                 s->regs[LPI2C_MSR / 4] |= LPI2C_MSR_BUSY_MASK;
@@ -281,7 +302,7 @@ static void imx_lpi2c_write(void *opaque, hwaddr offset,
 
         case LPI2C_MTDR_CMD_RX_DATA:
         {
-            unsigned count = data + 1;
+            unsigned int count = data + 1;
 
             s->rx_pending += count;
             imx_lpi2c_fill_rx(s);
@@ -291,7 +312,7 @@ static void imx_lpi2c_write(void *opaque, hwaddr offset,
 
         case LPI2C_MTDR_CMD_STOP:
             if (s->rx_pending) {
-                s->stop_pending = true; 
+                s->stop_pending = true;
             } else {
                 imx_lpi2c_do_stop(s);
             }
@@ -368,20 +389,36 @@ static void imx_lpi2c_reset(DeviceState *dev)
 
     memset(s->regs, 0, sizeof(s->regs));
 
-    s->regs[LPI2C_VERID / 4] = 0x00010000;
+    s->regs[LPI2C_VERID / 4] = LPI2C_VERID_VALUE;
     s->regs[LPI2C_PARAM / 4] = LPI2C_PARAM_VALUE;
 
     imx_lpi2c_master_reset(s);
+}
+
+static int imx_lpi2c_post_load(void *opaque, int version_id)
+{
+    IMXLPI2CState *s = opaque;
+
+    if (s->rx_len > IMX_LPI2C_RX_FIFO_SIZE ||
+        s->rx_pos > s->rx_len) {
+        return -EINVAL;
+    }
+
+    imx_lpi2c_update_outputs(s, true);
+
+    return 0;
 }
 
 static const VMStateDescription vmstate_imx_lpi2c = {
     .name = TYPE_IMX_LPI2C,
     .version_id = 2,
     .minimum_version_id = 1,
+    .post_load = imx_lpi2c_post_load,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT32_ARRAY(regs, IMXLPI2CState,
                              IMX_LPI2C_MMIO_SIZE / 4),
-        VMSTATE_UINT8_ARRAY(rx_fifo, IMXLPI2CState, 16),
+        VMSTATE_UINT8_ARRAY(rx_fifo, IMXLPI2CState,
+                            IMX_LPI2C_RX_FIFO_SIZE),
         VMSTATE_UINT32(rx_len, IMXLPI2CState),
         VMSTATE_UINT32(rx_pos, IMXLPI2CState),
         VMSTATE_UINT32_V(rx_pending, IMXLPI2CState, 2),
@@ -401,18 +438,27 @@ static void imx_lpi2c_init(Object *obj)
                           TYPE_IMX_LPI2C, IMX_LPI2C_MMIO_SIZE);
     sysbus_init_mmio(sbd, &s->iomem);
     sysbus_init_irq(sbd, &s->irq);
-    qdev_init_gpio_out_named(DEVICE(obj), &s->tx_dma_req, "tx-dma-req", 1);
-    qdev_init_gpio_out_named(DEVICE(obj), &s->rx_dma_req, "rx-dma-req", 1);
+    qdev_init_gpio_out_named(DEVICE(obj), &s->tx_dma_req,
+                             "tx-dma-req", 1);
+    qdev_init_gpio_out_named(DEVICE(obj), &s->rx_dma_req,
+                             "rx-dma-req", 1);
 
 }
 
 static void imx_lpi2c_realize(DeviceState *dev, Error **errp)
 {
     IMXLPI2CState *s = IMX_LPI2C(dev);
-    g_autofree char *name = NULL;
+    g_autofree char *name =
+        g_strdup(object_get_canonical_path_component(OBJECT(dev)));
 
-    name = g_strdup(object_get_canonical_path_component(OBJECT(dev)));
     s->bus = i2c_init_bus(dev, name);
+}
+
+static void imx_lpi2c_unrealize(DeviceState *dev)
+{
+    IMXLPI2CState *s = IMX_LPI2C(dev);
+
+    i2c_end_transfer(s->bus);
 }
 
 static void imx_lpi2c_class_init(ObjectClass *klass, const void *data)
@@ -420,6 +466,7 @@ static void imx_lpi2c_class_init(ObjectClass *klass, const void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->realize = imx_lpi2c_realize;
+    dc->unrealize = imx_lpi2c_unrealize;
     device_class_set_legacy_reset(dc, imx_lpi2c_reset);
     dc->vmsd = &vmstate_imx_lpi2c;
     dc->desc = "NXP i.MX LPI2C controller";
@@ -439,3 +486,4 @@ static void imx_lpi2c_register_types(void)
 }
 
 type_init(imx_lpi2c_register_types)
+

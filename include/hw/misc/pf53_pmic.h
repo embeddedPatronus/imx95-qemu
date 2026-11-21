@@ -10,17 +10,19 @@
 #define HW_MISC_PF53_PMIC_H
 
 #include "hw/i2c/i2c.h"
-#include "qom/object.h"
 
 #define TYPE_PF53_PMIC "pf53-pmic"
 OBJECT_DECLARE_SIMPLE_TYPE(PF53PMICState, PF53_PMIC)
 
-typedef struct PF53PMICState {
+#define PF53_PMIC_REG_COUNT 256
+
+struct PF53PMICState {
     I2CSlave parent_obj;
 
-    uint8_t regs[256];
+    uint8_t regs[PF53_PMIC_REG_COUNT];
     uint8_t reg_ptr;
     bool have_reg_ptr;
-} PF53PMICState;
+};
 
 #endif /* HW_MISC_PF53_PMIC_H */
+

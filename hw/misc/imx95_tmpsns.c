@@ -16,6 +16,9 @@
 #include "hw/core/irq.h"
 #include "system/memory.h"
 
+#define TMPSNS_STAT_DRDY_IF  BIT(16)
+#define TMPSNS_STAT_IDLE     BIT(31)
+
 static uint32_t imx95_tmpsns_get_word(Imx95TmpsnsState *s,
                                       hwaddr word_offset)
 {
@@ -77,6 +80,22 @@ static uint64_t imx95_tmpsns_read(void *opaque,
     }
 
     value = imx95_tmpsns_get_word(s, word_offset);
+
+    if (s->temp_raw) {
+        switch (word_offset) {
+        case 0x010:             /* STAT0: data ready, idle */
+        case 0x210:             /* STAT1 */
+            /* A conversion is always finished */
+            value |= TMPSNS_STAT_DRDY_IF | TMPSNS_STAT_IDLE;
+            break;
+        case 0x020:             /* DATA0 */
+        case 0x220:             /* DATA1 */
+            value = (value & ~0xffffU) | (s->temp_raw & 0xffffU);
+            break;
+        default:
+            break;
+        }
+    }
 
     switch (size) {
     case 1:
@@ -164,6 +183,10 @@ static void imx95_tmpsns_init(Object *obj)
     sysbus_init_mmio(SYS_BUS_DEVICE(obj), &s->iomem);
 }
 
+static const Property imx95_tmpsns_properties[] = {
+    DEFINE_PROP_UINT32("temp-raw", Imx95TmpsnsState, temp_raw, 0),
+};
+
 static const VMStateDescription vmstate_imx95_tmpsns = {
     .name = TYPE_IMX95_TMPSNS,
     .version_id = 1,
@@ -181,6 +204,7 @@ static void imx95_tmpsns_class_init(ObjectClass *oc, const void *data)
     device_class_set_legacy_reset(dc, imx95_tmpsns_reset);
     dc->vmsd = &vmstate_imx95_tmpsns;
     dc->desc = "i.MX95 tmpsns";
+    device_class_set_props(dc, imx95_tmpsns_properties);
 }
 
 static const TypeInfo imx95_tmpsns_types[] = {

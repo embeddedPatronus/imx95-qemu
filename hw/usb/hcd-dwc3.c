@@ -345,6 +345,7 @@ REG32(GFLADJ, 0x530)
     FIELD(GFLADJ, GFLADJ_30MHZ, 0, 6)
 REG32(GUSB2RHBCTL, 0x540)
     FIELD(GUSB2RHBCTL, OVRD_L1TIMEOUT, 0, 4)
+/* Device-mode registers: modelled as plain registers */
 REG32(DCFG, 0x600)
 REG32(DCTL, 0x604)
     FIELD(DCTL, RUN_STOP, 31, 1)
@@ -409,6 +410,7 @@ static void usb_dwc3_guid_postw(RegisterInfo *reg, uint64_t val64)
     s->regs[R_GUID] = s->cfg.dwc_usb3_user;
 }
 
+/* Soft reset completes at once: clear CSFTRST */
 static void usb_dwc3_dctl_postw(RegisterInfo *reg, uint64_t val64)
 {
     USBDWC3 *s = USB_DWC3(reg->opaque);

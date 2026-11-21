@@ -10,6 +10,7 @@
 #include "system/memory.h"
 #include "hw/misc/imx95_netc_ecam.h"
 
+/* Empty ECAM window: reads return all-ones, writes are dropped */
 static uint64_t imx95_netc_ecam_read(void *opaque, hwaddr offset,
                                      unsigned size)
 {

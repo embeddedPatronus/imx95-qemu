@@ -13,6 +13,7 @@
 #include "qom/object.h"
 
 #define IMX95_SRC_GEN_SIZE               0x10000
+#define IMX95_SRC_GEN_MAX_A55            6
 
 #define TYPE_IMX95_SRC_GEN "imx95.src-gen"
 OBJECT_DECLARE_SIMPLE_TYPE(Imx95SrcGenState, IMX95_SRC_GEN)
@@ -23,8 +24,12 @@ struct Imx95SrcGenState {
     MemoryRegion iomem;
     uint32_t regs[IMX95_SRC_GEN_SIZE / sizeof(uint32_t)];
 
-    qemu_irq a55_hold[7];
-    bool a55_hold_state[7];
+    qemu_irq a55_hold[IMX95_SRC_GEN_MAX_A55 + 1];
+    bool a55_hold_state[IMX95_SRC_GEN_MAX_A55 + 1];
+
+    uint32_t a55_core0_slice;
+    uint32_t a55_platform_slice;
+    uint32_t num_a55;
 };
 
 #endif /* HW_MISC_IMX95_SRC_GEN_H */

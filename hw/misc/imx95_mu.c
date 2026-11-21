@@ -11,6 +11,7 @@
 #include "qemu/timer.h"
 #include "trace.h"
 #include "hw/core/resettable.h"
+#include "hw/core/qdev-properties.h"
 #include "migration/vmstate.h"
 #include "qemu/log.h"
 #include "qemu/module.h"
@@ -95,8 +96,11 @@ static void mu_update_irq(IMX95MUState *s, unsigned side)
 
 static void mu_update_irqs(IMX95MUState *s)
 {
-    mu_update_irq(s, 0);
-    mu_update_irq(s, 1);
+    unsigned int side;
+
+    for (side = 0; side < IMX95_MU_NUM_SIDES; side++) {
+        mu_update_irq(s, side);
+    }
 }
 
 static void mu_reset_state(IMX95MUState *s)
@@ -107,7 +111,7 @@ static void mu_reset_state(IMX95MUState *s)
     memset(s->cier0, 0, sizeof(s->cier0));
     memset(s->cssr0, 0, sizeof(s->cssr0));
     memset(s->fcr, 0, sizeof(s->fcr));
-    memset(s->gier, 0, sizeof(s->gier));
+    memcpy(s->gier, s->gier_reset, sizeof(s->gier));
     memset(s->gp_pending, 0, sizeof(s->gp_pending));
     memset(s->tcr, 0, sizeof(s->tcr));
     memset(s->rcr, 0, sizeof(s->rcr));
@@ -115,18 +119,13 @@ static void mu_reset_state(IMX95MUState *s)
     memset(s->rx, 0, sizeof(s->rx));
     s->flags = 0;
 
-    for (side = 0; side < 2; side++) {
+    for (side = 0; side < IMX95_MU_NUM_SIDES; side++) {
         s->ccr0[side] = MU_CCR0_RESET;
         s->tx_empty[side] = MU_CHANNEL_MASK;
         s->rx_full[side] = 0;
     }
     mu_update_irqs(s);
 }
-
-typedef struct IMX95MUEndpoint {
-    IMX95MUState *mu;
-    unsigned side;
-} IMX95MUEndpoint;
 
 static uint64_t mu_endpoint_read(void *opaque, hwaddr offset, unsigned size)
 {
@@ -169,6 +168,7 @@ static uint64_t mu_endpoint_read(void *opaque, hwaddr offset, unsigned size)
 
     if (offset >= MU_RR_BASE && offset < MU_RR_BASE + 0x10) {
         index = (offset - MU_RR_BASE) >> 2;
+        /* Reading frees the sender's transmit register */
         value = s->rx[side][index];
         if (s->rx_full[side] & BIT(index)) {
             s->rx_full[side] &= ~BIT(index);
@@ -223,6 +223,7 @@ static void mu_endpoint_write(void *opaque, hwaddr offset,
         s->gier[side] = v & MU_CHANNEL_MASK;
         mu_update_irq(s, side);
         return;
+    /* A GCR write raises the general-purpose interrupt on the peer */
     case MU_GCR:
         s->gp_pending[peer] |= v & MU_CHANNEL_MASK;
         trace_imx95_mu_gcr_write(object_get_canonical_path_component(OBJECT(s)),
@@ -269,6 +270,7 @@ static void mu_endpoint_write(void *opaque, hwaddr offset,
                           side, index);
             return;
         }
+        /* The word goes straight into the peer's receive register */
         s->tx[side][index] = v;
         s->rx[peer][index] = v;
         s->tx_empty[side] &= ~BIT(index);
@@ -348,11 +350,11 @@ static void mu_init(Object *obj)
 {
     IMX95MUState *s = IMX95_MU(obj);
     SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
-    IMX95MUEndpoint *ep;
-    unsigned side;
+    unsigned int side;
 
-    for (side = 0; side < 2; side++) {
-        ep = g_new0(IMX95MUEndpoint, 1);
+    for (side = 0; side < ARRAY_SIZE(s->endpoint); side++) {
+        IMX95MUEndpoint *ep = &s->endpoint[side];
+
         ep->mu = s;
         ep->side = side;
         memory_region_init_io(&s->iomem[side], obj, &mu_ops, ep,
@@ -363,6 +365,11 @@ static void mu_init(Object *obj)
     }
 }
 
+static const Property mu_properties[] = {
+    DEFINE_PROP_UINT32("gier0-reset", IMX95MUState, gier_reset[0], 0),
+    DEFINE_PROP_UINT32("gier1-reset", IMX95MUState, gier_reset[1], 0),
+};
+
 static void mu_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
@@ -370,6 +377,7 @@ static void mu_class_init(ObjectClass *klass, const void *data)
 
     dc->desc = "NXP i.MX95 Messaging Unit";
     dc->vmsd = &vmstate_imx95_mu;
+    device_class_set_props(dc, mu_properties);
     resettable_class_set_parent_phases(rc, mu_reset_enter, NULL, NULL,
                                        &mu_parent_phases);
 }
@@ -388,3 +396,4 @@ static void mu_register_types(void)
 }
 
 type_init(mu_register_types)
+

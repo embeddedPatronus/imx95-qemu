@@ -2777,17 +2777,7 @@ static bool get_phys_addr_pmsav7(CPUARMState *env,
                 if (!arm_feature(env, ARM_FEATURE_M)) {
                     continue;
                 }
-                /*
-                 * Armv7-M: firmware must align MPU_RBAR.ADDR to the region
-                 * size (Arm ARM DDI0403E.e B3.5.8), but a base that is not
-                 * aligned is not a fault. The region match in the PMSAv7
-                 * pseudocode (B3.5.3, ValidateAddress) compares
-                 * address<31:lsbit> with base_address<31:lsbit> only, so the
-                 * bits of the base below the region size take no part in
-                 * the match and the region is the one at the aligned-down
-                 * base. Real firmware relies on this, for example the NXP
-                 * MCUXpresso SDK MPU set-up of the i.MX95 Cortex-M7.
-                 */
+                /* M-profile: the unaligned low bits of the base are ignored */
                 base &= ~rmask;
             }
 

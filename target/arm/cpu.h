@@ -519,15 +519,14 @@ typedef struct CPUArchState {
         uint64_t osdlr_el1; /* OS DoubleLock status */
         uint64_t mdcr_el2;
         uint64_t mdcr_el3;
+        /* Implementation-defined registers (Cortex-A55), see cpu64.c */
+        uint64_t impdef_regs[16];
+#define ARM_IMPDEF_A55_CPUPWRCTLR 2     /* index into impdef_regs[] */
         /* Stores the architectural value of the counter *the last time it was
          * updated* by pmccntr_op_start. Accesses should always be surrounded
          * by pmccntr_op_start/pmccntr_op_finish to guarantee the latest
          * architecturally-correct value is being read/set.
          */
-        /* Implementation-defined system registers of cores that define a few (Cortex-A55) */
-        uint64_t impdef_regs[16];
-        /* indices into impdef_regs[] */
-#define ARM_IMPDEF_A55_CPUPWRCTLR 2
         uint64_t c15_ccnt;
         /* Stores the delta between the architectural value and the underlying
          * cycle count during normal operation. It is used to update c15_ccnt
@@ -999,7 +998,7 @@ struct ArchCPU {
     qemu_irq gicv3_maintenance_interrupt;
     /* GPIO output for the PMU interrupt */
     qemu_irq pmu_interrupt;
-    /* GPIO output: the core entered a power-down WFI (e.g. Cortex-A55 CPUPWRCTLR_EL1.CORE_PWRDN_EN) */
+    /* GPIO output: the core entered a power-down WFI (A55 CPUPWRCTLR_EL1) */
     qemu_irq wfi_powerdown;
 
     /* MemoryRegion to use for secure physical accesses */
