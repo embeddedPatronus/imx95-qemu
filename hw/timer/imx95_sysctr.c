@@ -44,7 +44,7 @@
 #define   CMPCR_IMASK           BIT(1)
 #define   CMPCR_ISTAT           BIT(2)
 
-static uint64_t sysctr_count(Imx95SysctrState *s)
+static uint64_t sysctr_count(const Imx95SysctrState *s)
 {
     int64_t dt;
 
@@ -59,9 +59,11 @@ static uint64_t sysctr_count(Imx95SysctrState *s)
                                    NANOSECONDS_PER_SECOND)) & SYSCTR_CNT_MASK;
 }
 
-static bool sysctr_istat(Imx95SysctrState *s, unsigned f, uint64_t cnt)
+static bool sysctr_istat(const Imx95SysctrState *s,
+                          unsigned int frame, uint64_t count)
 {
-    return (s->cmpcr[f] & CMPCR_EN) && cnt >= s->cmpcv[f];
+    return (s->cmpcr[frame] & CMPCR_EN) &&
+           count >= s->cmpcv[frame];
 }
 
 static void sysctr_update(Imx95SysctrState *s)
@@ -69,7 +71,7 @@ static void sysctr_update(Imx95SysctrState *s)
     uint64_t cnt = sysctr_count(s);
     int64_t next = INT64_MAX;
 
-    for (unsigned f = 0; f < IMX95_SYSCTR_NUM_COMPARE; f++) {
+    for (unsigned int f = 0; f < IMX95_SYSCTR_NUM_COMPARE; f++) {
         bool istat = sysctr_istat(s, f, cnt);
 
         qemu_set_irq(s->irq[f], istat && !(s->cmpcr[f] & CMPCR_IMASK));
@@ -165,7 +167,8 @@ static void sysctr_ctrl_write(void *opaque, hwaddr offset, uint64_t value,
 }
 
 
-static bool sysctr_cmp_decode(hwaddr offset, unsigned *frame, hwaddr *reg)
+static bool sysctr_cmp_decode(hwaddr offset, unsigned int *frame,
+                               hwaddr *reg)
 {
     if (offset < CMP_FRAME_BASE ||
         offset >= CMP_FRAME_BASE + IMX95_SYSCTR_NUM_COMPARE * CMP_FRAME_STRIDE) {
@@ -179,7 +182,7 @@ static bool sysctr_cmp_decode(hwaddr offset, unsigned *frame, hwaddr *reg)
 static uint64_t sysctr_cmp_read(void *opaque, hwaddr offset, unsigned size)
 {
     Imx95SysctrState *s = opaque;
-    unsigned f;
+    unsigned int f;
     hwaddr reg;
 
     if (!sysctr_cmp_decode(offset, &f, &reg)) {
@@ -204,7 +207,7 @@ static void sysctr_cmp_write(void *opaque, hwaddr offset, uint64_t value,
 {
     Imx95SysctrState *s = opaque;
     uint32_t v = value;
-    unsigned f;
+    unsigned int f;
     hwaddr reg;
 
     if (!sysctr_cmp_decode(offset, &f, &reg)) {
@@ -277,17 +280,12 @@ static void sysctr_reset(DeviceState *dev)
     sysctr_update(s);
 }
 
-static void sysctr_realize(DeviceState *dev, Error **errp)
-{
-    Imx95SysctrState *s = IMX95_SYSCTR(dev);
-
-    s->timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, sysctr_timer_cb, s);
-}
-
 static void sysctr_init(Object *obj)
 {
     Imx95SysctrState *s = IMX95_SYSCTR(obj);
     SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
+
+    s->timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, sysctr_timer_cb, s);
 
     memory_region_init_io(&s->iomem[0], obj, &sysctr_ctrl_ops, s,
                           "imx95.sysctr-control", IMX95_SYSCTR_FRAME_SIZE);
@@ -295,12 +293,19 @@ static void sysctr_init(Object *obj)
                           "imx95.sysctr-compare", IMX95_SYSCTR_FRAME_SIZE);
     memory_region_init_io(&s->iomem[2], obj, &sysctr_read_ops, s,
                           "imx95.sysctr-read", IMX95_SYSCTR_FRAME_SIZE);
-    for (unsigned i = 0; i < ARRAY_SIZE(s->iomem); i++) {
+    for (unsigned int i = 0; i < ARRAY_SIZE(s->iomem); i++) {
         sysbus_init_mmio(sbd, &s->iomem[i]);
     }
-    for (unsigned i = 0; i < IMX95_SYSCTR_NUM_COMPARE; i++) {
+    for (unsigned int i = 0; i < IMX95_SYSCTR_NUM_COMPARE; i++) {
         sysbus_init_irq(sbd, &s->irq[i]);
     }
+}
+
+static void sysctr_finalize(Object *obj)
+{
+    Imx95SysctrState *s = IMX95_SYSCTR(obj);
+
+    timer_free(s->timer);
 }
 
 static int sysctr_post_load(void *opaque, int version_id)
@@ -331,7 +336,6 @@ static void sysctr_class_init(ObjectClass *oc, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(oc);
 
-    dc->realize = sysctr_realize;
     device_class_set_legacy_reset(dc, sysctr_reset);
     dc->vmsd = &vmstate_imx95_sysctr;
     dc->desc = "i.MX95 system counter";
@@ -343,8 +347,10 @@ static const TypeInfo imx95_sysctr_types[] = {
         .parent = TYPE_SYS_BUS_DEVICE,
         .instance_size = sizeof(Imx95SysctrState),
         .instance_init = sysctr_init,
+        .instance_finalize = sysctr_finalize,
         .class_init = sysctr_class_init,
     },
 };
 
 DEFINE_TYPES(imx95_sysctr_types)
+

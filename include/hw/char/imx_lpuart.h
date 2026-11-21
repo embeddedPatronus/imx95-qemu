@@ -6,12 +6,11 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
-#ifndef IMX_LPUART_H
-#define IMX_LPUART_H
+#ifndef HW_CHAR_IMX_LPUART_H
+#define HW_CHAR_IMX_LPUART_H
 
-#include "hw/core/sysbus.h"
 #include "chardev/char-fe.h"
-#include "qom/object.h"
+#include "hw/core/sysbus.h"
 
 #define TYPE_IMX_LPUART "imx.lpuart"
 OBJECT_DECLARE_SIMPLE_TYPE(IMXLPUARTState, IMX_LPUART)
@@ -54,10 +53,12 @@ OBJECT_DECLARE_SIMPLE_TYPE(IMXLPUARTState, IMX_LPUART)
 #define LPUART_WATER_RXCOUNT_SHIFT  (24U)
 
 #define LPUART_WATER_TXCOUNT(x) \
-    (((uint32_t)(x) << LPUART_WATER_TXCOUNT_SHIFT) & LPUART_WATER_TXCOUNT_MASK)
+    (((uint32_t)(x) << LPUART_WATER_TXCOUNT_SHIFT) & \
+     LPUART_WATER_TXCOUNT_MASK)
 
 #define LPUART_WATER_RXCOUNT(x) \
-    (((uint32_t)(x) << LPUART_WATER_RXCOUNT_SHIFT) & LPUART_WATER_RXCOUNT_MASK)
+    (((uint32_t)(x) << LPUART_WATER_RXCOUNT_SHIFT) & \
+     LPUART_WATER_RXCOUNT_MASK)
 
 #define LPUART_FIFO_RXEMPT_MASK   (0x400000U)
 #define LPUART_FIFO_RXEMPT_SHIFT  (22U)
@@ -105,4 +106,5 @@ struct IMXLPUARTState {
     CharFrontend chr;
 };
 
-#endif
+#endif /* HW_CHAR_IMX_LPUART_H */
+

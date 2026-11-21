@@ -169,6 +169,12 @@ static void imx95_blk_ctrl_a55_gic_wake_in(void *opaque, int n, int level)
     imx95_blk_ctrl_a55_wake_eval(s, n);
 }
 
+uint32_t imx95_blk_ctrl_s_aonmix_get_m7_initvtor(
+    Imx95BlkCtrlSAonmixState *s)
+{
+    return s->m7_initvtor;
+}
+
 static uint64_t imx95_blk_ctrl_s_aonmix_read(void *opaque,
                                              hwaddr offset,
                                              unsigned size)
@@ -396,3 +402,4 @@ static const TypeInfo imx95_blk_ctrl_s_aonmix_types[] = {
 };
 
 DEFINE_TYPES(imx95_blk_ctrl_s_aonmix_types)
+

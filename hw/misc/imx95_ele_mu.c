@@ -8,7 +8,6 @@
 
 #include "qemu/osdep.h"
 #include "qemu/bitops.h"
-#include "qemu/error-report.h"
 #include "qemu/log.h"
 #include "qemu/guest-random.h"
 #include "system/address-spaces.h"
@@ -23,6 +22,11 @@
 
 typedef struct Imx95EleMuState Imx95EleMuState;
 
+static unsigned int imx95_ele_mu_reg_index(hwaddr offset)
+{
+    return offset / sizeof(uint32_t);
+}
+
 
 
 static uint32_t imx95_ele_mu_status(Imx95EleMuState *s,
@@ -30,7 +34,7 @@ static uint32_t imx95_ele_mu_status(Imx95EleMuState *s,
                                    hwaddr reg_offset)
 {
     hwaddr offset = block * IMX95_MU_BLOCK_SIZE + reg_offset;
-    uint32_t value = s->regs[offset / sizeof(uint32_t)];
+    uint32_t value = s->regs[imx95_ele_mu_reg_index(offset)];
 
     switch (reg_offset) {
     case IMX95_MU_TSR_OFFSET:
@@ -111,8 +115,8 @@ static void imx95_ele_mu_queue_response(Imx95EleMuState *s)
 
     switch (cmd) {
     case ELE_ENABLE_AUX_REQ:
-        s->rx_words[0] = ((uint32_t) ELE_MSG_TAG_RESP << 24) |
-                         ((uint32_t) cmd << 16) |
+        s->rx_words[0] = ((uint32_t)ELE_MSG_TAG_RESP << 24) |
+                         ((uint32_t)cmd << 16) |
                          (2U << 8) |
                          ELE_MSG_VER;
 
@@ -291,8 +295,8 @@ static void imx95_ele_mu_queue_response(Imx95EleMuState *s)
 
 
     default:
-        s->rx_words[0] = ((uint32_t) ELE_MSG_TAG_RESP << 24) |
-                         ((uint32_t) cmd << 16) |
+        s->rx_words[0] = ((uint32_t)ELE_MSG_TAG_RESP << 24) |
+                         ((uint32_t)cmd << 16) |
                          (2U << 8) |
                          ELE_MSG_VER;
         s->rx_words[1] = ELE_SUCCESS_IND;
@@ -318,7 +322,7 @@ static uint64_t imx95_ele_mu_read(void *opaque, hwaddr offset, unsigned size)
         return 0;
     }
 
-    value = s->regs[offset / 4];
+    value = s->regs[imx95_ele_mu_reg_index(offset)];
 
  if (block_off == IMX95_MU_PAR_OFFSET) {
  return IMX95_MU_PAR_4TR_4RR;
@@ -380,7 +384,7 @@ static void imx95_ele_mu_write(void *opaque, hwaddr offset,
         return;
     }
 
-    s->regs[offset / 4] = value;
+    s->regs[imx95_ele_mu_reg_index(offset)] = value;
 
     if (block_off == IMX95_MU_TCR_OFFSET ||
         block_off == IMX95_MU_RCR_OFFSET) {
@@ -396,7 +400,7 @@ static void imx95_ele_mu_write(void *opaque, hwaddr offset,
     if (block_off >= IMX95_MU_TR_OFFSET &&
         block_off < IMX95_MU_TR_OFFSET + 0x10) {
        uint32_t idx = (block_off - IMX95_MU_TR_OFFSET) / 4;
-        uint32_t word = (uint32_t) value;
+        uint32_t word = (uint32_t)value;
 
 	uint32_t expected_idx;
 	qemu_log_mask(LOG_GUEST_ERROR,
@@ -559,16 +563,29 @@ static void imx95_ele_mu_init(Object *obj)
                             "ca55-irq-mask", 1);
 }
 
+static int imx95_ele_mu_post_load(void *opaque, int version_id)
+{
+    Imx95EleMuState *s = opaque;
+
+    imx95_ele_mu_update_mu3_irq(s);
+
+    return 0;
+}
+
 static const VMStateDescription vmstate_imx95_ele_mu = {
     .name = TYPE_IMX95_ELE_MU,
     .version_id = 2,
     .minimum_version_id = 1,
+    .post_load = imx95_ele_mu_post_load,
     .fields = (const VMStateField[]) {
-        VMSTATE_UINT32_ARRAY(regs, Imx95EleMuState, IMX95_ELE_MU_SIZE / 4),
-        VMSTATE_UINT32_ARRAY(tx_words, Imx95EleMuState, 8),
+        VMSTATE_UINT32_ARRAY(regs, Imx95EleMuState,
+                             IMX95_ELE_MU_REG_COUNT),
+        VMSTATE_UINT32_ARRAY(tx_words, Imx95EleMuState,
+                             IMX95_ELE_MSG_MAX_WORDS),
         VMSTATE_UINT32(tx_count, Imx95EleMuState),
         VMSTATE_UINT32(tx_expected, Imx95EleMuState),
-        VMSTATE_UINT32_ARRAY(rx_words, Imx95EleMuState, 8),
+        VMSTATE_UINT32_ARRAY(rx_words, Imx95EleMuState,
+                             IMX95_ELE_MSG_MAX_WORDS),
         VMSTATE_UINT32(rx_count, Imx95EleMuState),
         VMSTATE_UINT32(rx_pos, Imx95EleMuState),
         VMSTATE_UINT32(active_block, Imx95EleMuState),
@@ -592,7 +609,7 @@ static void imx95_ele_mu_class_init(ObjectClass *oc, const void *data)
 
     device_class_set_legacy_reset(dc, imx95_ele_mu_reset);
     dc->vmsd = &vmstate_imx95_ele_mu;
-    dc->desc = "i.MX95 ele mu";
+    dc->desc = "i.MX95 ELE MU";
 }
 
 static const TypeInfo imx95_ele_mu_types[] = {
@@ -606,3 +623,4 @@ static const TypeInfo imx95_ele_mu_types[] = {
 };
 
 DEFINE_TYPES(imx95_ele_mu_types)
+

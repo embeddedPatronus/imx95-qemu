@@ -16,21 +16,23 @@
 OBJECT_DECLARE_SIMPLE_TYPE(Imx95SysctrState, IMX95_SYSCTR)
 
 #define IMX95_SYSCTR_FRAME_SIZE     0x10000
+#define IMX95_SYSCTR_NUM_FRAMES     3
 #define IMX95_SYSCTR_NUM_COMPARE    2
 
 struct Imx95SysctrState {
     SysBusDevice parent_obj;
 
-    MemoryRegion iomem[3];
+    MemoryRegion iomem[IMX95_SYSCTR_NUM_FRAMES];
     qemu_irq irq[IMX95_SYSCTR_NUM_COMPARE];
     QEMUTimer *timer;
 
     uint32_t cntcr;
-    bool alt_freq; 
-    uint64_t cnt_base; 
-    int64_t t_base; 
+    bool alt_freq;
+    uint64_t cnt_base;
+    int64_t t_base;
     uint64_t cmpcv[IMX95_SYSCTR_NUM_COMPARE];
     uint32_t cmpcr[IMX95_SYSCTR_NUM_COMPARE];
 };
 
 #endif /* HW_TIMER_IMX95_SYSCTR_H */
+

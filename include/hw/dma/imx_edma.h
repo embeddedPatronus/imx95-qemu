@@ -1,5 +1,5 @@
 /*
- * NXP i.MX enhanced Direct Memory Access controller 
+ * NXP i.MX enhanced Direct Memory Access controller
  *
  * Copyright (c) 2026 Gaurav Sharma <gaurav.sharma0394@gmail.com>
  *
@@ -21,6 +21,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(IMXEDMAState, IMX_EDMA)
 
 #define IMX_EDMA_MAX_CHANNELS   64
 #define IMX_EDMA_MAX_REQUESTS   128
+#define IMX_EDMA_REQUEST_WORDS  DIV_ROUND_UP(IMX_EDMA_MAX_REQUESTS, 32)
 #define IMX_EDMA_TCD_BYTES      64
 
 struct IMXEDMATcdLayout;
@@ -37,10 +38,10 @@ struct IMXEDMAState {
     qemu_irq err_irq;
 
     /* Properties */
-    uint32_t version;        
+    uint32_t version;
     uint32_t num_channels;
     uint32_t num_requests;
-    bool paired_irqs;     
+    bool paired_irqs;
 
     const struct IMXEDMATcdLayout *layout;
     uint32_t ch_base;
@@ -56,7 +57,7 @@ struct IMXEDMAState {
     uint32_t prot[IMX_EDMA_MAX_CHANNELS];
     uint32_t rr_next;
 
-    uint32_t req[IMX_EDMA_MAX_REQUESTS / 32];
+    uint32_t req[IMX_EDMA_REQUEST_WORDS];
 
     /* Channels */
     uint32_t ch_csr[IMX_EDMA_MAX_CHANNELS];
@@ -69,3 +70,4 @@ struct IMXEDMAState {
 };
 
 #endif /* HW_DMA_IMX_EDMA_H */
+

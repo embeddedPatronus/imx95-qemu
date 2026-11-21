@@ -14,58 +14,22 @@
 #include "migration/vmstate.h"
 #include "qemu/log.h"
 #include "qemu/module.h"
-#include "trace.h"
-
-#ifndef DEBUG_IMX_LPUART
-#define DEBUG_IMX_LPUART 0
-#endif
-
-#define DPRINTF(fmt, args...) \
-    do { \
-        if (DEBUG_IMX_LPUART) { \
-            fprintf(stderr, "[%s]%s: " fmt , TYPE_IMX_LPUART, \
-                                             __func__, ##args); \
-        } \
-    } while (0)
-
-static const VMStateDescription vmstate_imx_lpuart = {
-    .name = TYPE_IMX_LPUART,
-    .version_id = 1,
-    .minimum_version_id = 1,
-    .fields = (const VMStateField[]) {
-        VMSTATE_UINT32(verid, IMXLPUARTState),
-        VMSTATE_UINT32(param, IMXLPUARTState),
-        VMSTATE_UINT32(global, IMXLPUARTState),
-        VMSTATE_UINT32(pincfg, IMXLPUARTState),
-        VMSTATE_UINT32(baud, IMXLPUARTState),
-        VMSTATE_UINT32(stat, IMXLPUARTState),
-        VMSTATE_UINT32(ctrl, IMXLPUARTState),
-        VMSTATE_UINT32(data, IMXLPUARTState),
-        VMSTATE_UINT32(match, IMXLPUARTState),
-        VMSTATE_UINT32(modir, IMXLPUARTState),
-        VMSTATE_UINT32(fifo, IMXLPUARTState),
-        VMSTATE_UINT32(water, IMXLPUARTState),
-	VMSTATE_UINT8_ARRAY(rx_fifo, IMXLPUARTState, IMX_LPUART_RX_FIFO_SIZE),
-	VMSTATE_UINT32(rx_head, IMXLPUARTState),
-	VMSTATE_UINT32(rx_tail, IMXLPUARTState),
-	VMSTATE_UINT32(rx_count, IMXLPUARTState),
-	VMSTATE_END_OF_LIST()
-    },
-};
-
 static void imx_lpuart_update_irq(IMXLPUARTState *s)
 {
     bool level = false;
 
-    if ((s->ctrl & LPUART_CTRL_TIE) && (s->stat & LPUART_STAT_TDRE)) {
+    if ((s->ctrl & LPUART_CTRL_TIE) &&
+        (s->stat & LPUART_STAT_TDRE)) {
         level = true;
     }
 
-    if ((s->ctrl & LPUART_CTRL_TCIE) && (s->stat & LPUART_STAT_TC)) {
+    if ((s->ctrl & LPUART_CTRL_TCIE) &&
+        (s->stat & LPUART_STAT_TC)) {
         level = true;
     }
 
-    if ((s->ctrl & LPUART_CTRL_RIE) && (s->stat & LPUART_STAT_RDRF)) {
+    if ((s->ctrl & LPUART_CTRL_RIE) &&
+        (s->stat & LPUART_STAT_RDRF)) {
         level = true;
     }
 
@@ -159,8 +123,9 @@ static int imx_lpuart_can_receive(void *opaque)
 static void imx_lpuart_receive(void *opaque, const uint8_t *buf, int size)
 {
     IMXLPUARTState *s = opaque;
+    int i;
 
-    for (int i = 0; i < size; i++) {
+    for (i = 0; i < size; i++) {
         imx_lpuart_rx_push(s, buf[i]);
     }
 }
@@ -174,6 +139,51 @@ static void imx_lpuart_event(void *opaque, QEMUChrEvent event)
         imx_lpuart_rx_push(s, 0);
     }
 }
+
+static int imx_lpuart_post_load(void *opaque, int version_id)
+{
+    IMXLPUARTState *s = opaque;
+
+    if (s->rx_head >= IMX_LPUART_RX_FIFO_SIZE ||
+        s->rx_tail >= IMX_LPUART_RX_FIFO_SIZE ||
+        s->rx_count > IMX_LPUART_RX_FIFO_SIZE) {
+        return -EINVAL;
+    }
+
+    imx_lpuart_update_irq(s);
+    if ((s->ctrl & LPUART_CTRL_RE) && !imx_lpuart_rx_full(s)) {
+        qemu_chr_fe_accept_input(&s->chr);
+    }
+
+    return 0;
+}
+
+static const VMStateDescription vmstate_imx_lpuart = {
+    .name = TYPE_IMX_LPUART,
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .post_load = imx_lpuart_post_load,
+    .fields = (const VMStateField[]) {
+        VMSTATE_UINT32(verid, IMXLPUARTState),
+        VMSTATE_UINT32(param, IMXLPUARTState),
+        VMSTATE_UINT32(global, IMXLPUARTState),
+        VMSTATE_UINT32(pincfg, IMXLPUARTState),
+        VMSTATE_UINT32(baud, IMXLPUARTState),
+        VMSTATE_UINT32(stat, IMXLPUARTState),
+        VMSTATE_UINT32(ctrl, IMXLPUARTState),
+        VMSTATE_UINT32(data, IMXLPUARTState),
+        VMSTATE_UINT32(match, IMXLPUARTState),
+        VMSTATE_UINT32(modir, IMXLPUARTState),
+        VMSTATE_UINT32(fifo, IMXLPUARTState),
+        VMSTATE_UINT32(water, IMXLPUARTState),
+        VMSTATE_UINT8_ARRAY(rx_fifo, IMXLPUARTState,
+                            IMX_LPUART_RX_FIFO_SIZE),
+        VMSTATE_UINT32(rx_head, IMXLPUARTState),
+        VMSTATE_UINT32(rx_tail, IMXLPUARTState),
+        VMSTATE_UINT32(rx_count, IMXLPUARTState),
+        VMSTATE_END_OF_LIST()
+    },
+};
 
 static uint32_t imx_lpuart_fifo_value(IMXLPUARTState *s)
 {
@@ -223,27 +233,27 @@ static uint64_t imx_lpuart_read(void *opaque, hwaddr offset, unsigned size)
     switch (offset) {
     case LPUART_STAT:
         value = s->stat | LPUART_STAT_TDRE | LPUART_STAT_TC;
-	if (s->rx_count > 0) {
-		value |= LPUART_STAT_RDRF;
-	} else {
-	value &= ~LPUART_STAT_RDRF;
-	}
+        if (s->rx_count > 0) {
+            value |= LPUART_STAT_RDRF;
+        } else {
+            value &= ~LPUART_STAT_RDRF;
+        }
         break;
     case LPUART_WATER:
         value = imx_lpuart_water_value(s);
         break;
 
     case LPUART_FIFO:
-	value = imx_lpuart_fifo_value(s);
-	break;
+        value = imx_lpuart_fifo_value(s);
+        break;
     case LPUART_DATA:
-	if (!imx_lpuart_rx_empty(s)) {
-		value = imx_lpuart_rx_pop(s);
-		qemu_chr_fe_accept_input(&s->chr);
-	} else {
-	value = 0;
-	}
-	break;
+        if (!imx_lpuart_rx_empty(s)) {
+            value = imx_lpuart_rx_pop(s);
+            qemu_chr_fe_accept_input(&s->chr);
+        } else {
+            value = 0;
+        }
+        break;
 
     default:
         reg = imx_lpuart_reg_ptr(s, offset);
@@ -288,8 +298,7 @@ static void imx_lpuart_write(void *opaque, hwaddr offset,
             s->stat &= ~LPUART_STAT_RDRF;
         }
 
-        if (value & LPUART_FIFO_TXFLUSH_MASK) {
-        }
+        /* TX completes immediately, TXFLUSH has no queued state to clear. */
 
         s->fifo &= ~(value &
                      (LPUART_FIFO_RXUF_MASK | LPUART_FIFO_TXOF_MASK));
@@ -317,13 +326,13 @@ static void imx_lpuart_write(void *opaque, hwaddr offset,
     case LPUART_CTRL:
         s->ctrl = value;
         imx_lpuart_update_irq(s);
-	if (s->ctrl & LPUART_CTRL_RE) {
-		qemu_chr_fe_accept_input(&s->chr);
-	}
+        if (s->ctrl & LPUART_CTRL_RE) {
+            qemu_chr_fe_accept_input(&s->chr);
+        }
         break;
 
     case LPUART_DATA:
-	s->data = value;
+        s->data = value;
         ch = value & 0xff;
 
         qemu_chr_fe_write_all(&s->chr, &ch, 1);
@@ -386,10 +395,18 @@ static void imx_lpuart_realize(DeviceState *dev, Error **errp)
 {
     IMXLPUARTState *s = IMX_LPUART(dev);
 
-    qemu_chr_fe_set_handlers(&s->chr,imx_lpuart_can_receive,imx_lpuart_receive,
-				imx_lpuart_event,NULL,s,NULL,true);
+    qemu_chr_fe_set_handlers(&s->chr, imx_lpuart_can_receive,
+                             imx_lpuart_receive, imx_lpuart_event,
+                             NULL, s, NULL, true);
     qemu_chr_fe_accept_input(&s->chr);
+}
 
+static void imx_lpuart_unrealize(DeviceState *dev)
+{
+    IMXLPUARTState *s = IMX_LPUART(dev);
+
+    qemu_chr_fe_set_handlers(&s->chr, NULL, NULL, NULL, NULL, NULL, NULL,
+                             false);
 }
 
 static void imx_lpuart_init(Object *obj)
@@ -412,6 +429,7 @@ static void imx_lpuart_class_init(ObjectClass *klass, const void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->realize = imx_lpuart_realize;
+    dc->unrealize = imx_lpuart_unrealize;
     dc->vmsd = &vmstate_imx_lpuart;
     device_class_set_legacy_reset(dc, imx_lpuart_reset);
     device_class_set_props(dc, imx_lpuart_properties);
@@ -433,3 +451,4 @@ static void imx_lpuart_register_types(void)
 }
 
 type_init(imx_lpuart_register_types)
+

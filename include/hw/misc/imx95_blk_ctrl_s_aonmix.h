@@ -39,7 +39,11 @@
 #define IMX95_BLK_CTRL_NUM_A55          6
 
 #define TYPE_IMX95_BLK_CTRL_S_AONMIX "imx95.blk-ctrl-s-aonmix"
-OBJECT_DECLARE_SIMPLE_TYPE(Imx95BlkCtrlSAonmixState, IMX95_BLK_CTRL_S_AONMIX)
+OBJECT_DECLARE_SIMPLE_TYPE(Imx95BlkCtrlSAonmixState,
+                           IMX95_BLK_CTRL_S_AONMIX)
+
+uint32_t imx95_blk_ctrl_s_aonmix_get_m7_initvtor(
+    Imx95BlkCtrlSAonmixState *s);
 
 typedef struct Imx95A55Ctx {
     Imx95BlkCtrlSAonmixState *s;
@@ -63,7 +67,7 @@ struct Imx95BlkCtrlSAonmixState {
     Imx95A55Ctx a55_ctx[IMX95_BLK_CTRL_NUM_A55];
     bool a55_want_on[IMX95_BLK_CTRL_NUM_A55];
     uint64_t a55_want_entry[IMX95_BLK_CTRL_NUM_A55];
-    uint32_t a55_want_gen[IMX95_BLK_CTRL_NUM_A55]; 
+    uint32_t a55_want_gen[IMX95_BLK_CTRL_NUM_A55];
     uint32_t a55_run_gen[IMX95_BLK_CTRL_NUM_A55];
     bool a55_op_pending[IMX95_BLK_CTRL_NUM_A55];
 
@@ -72,3 +76,4 @@ struct Imx95BlkCtrlSAonmixState {
 };
 
 #endif /* HW_MISC_IMX95_BLK_CTRL_S_AONMIX_H */
+

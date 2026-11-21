@@ -42,10 +42,10 @@ struct FslImx95EvkState {
 #define IMX95_EVK_I2C7_PCAL6524_ADDR 0x22
 
 
-static I2CBus *imx95_evk_i2c_bus(FslImx95EvkState *s, int index)
+static I2CBus *imx95_evk_i2c_bus(FslImx95EvkState *s,
+                                    unsigned int index)
 {
-    g_assert(s->soc.lpi2c[index].bus != NULL);
-    return s->soc.lpi2c[index].bus;
+    return fsl_imx95_get_i2c_bus(&s->soc, index);
 }
 
 static void imx95_evk_init(MachineState *machine)
@@ -74,10 +74,9 @@ static void imx95_evk_init(MachineState *machine)
 
     if (di) {
         BlockBackend *blk = blk_by_legacy_dinfo(di);
-        BusState *bus = qdev_get_child_bus(DEVICE(&s->soc.usdhc[0]), "sd-bus");
+        BusState *bus = fsl_imx95_get_usdhc_bus(&s->soc, 0);
         DeviceState *card = qdev_new(TYPE_EMMC);
 
-        g_assert(bus != NULL);
         qdev_prop_set_drive_err(card, "drive", blk, &error_fatal);
         qdev_realize_and_unref(card, bus, &error_fatal);
     }
@@ -122,3 +121,4 @@ static const TypeInfo imx95_evk_machine_types[] = {
 };
 
 DEFINE_TYPES(imx95_evk_machine_types)
+

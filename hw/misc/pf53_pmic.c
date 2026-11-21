@@ -9,22 +9,26 @@
 #include "qemu/osdep.h"
 #include "hw/misc/pf53_pmic.h"
 #include "migration/vmstate.h"
-#include "qemu/log.h"
 #include "qemu/module.h"
 
-#define PF53_REG_DEV_ID    0x00
-#define PF53_REG_REV_ID    0x01
-#define PF53_REG_EMREV_ID  0x02
-#define PF53_REG_PROG_ID   0x03
+#define PF53_DEVICE_ID_REG       0x00
+#define PF53_REVISION_ID_REG     0x01
+#define PF53_EMREV_REG           0x02
+#define PF53_PROGRAM_ID_REG      0x03
+
+#define PF53_DEVICE_ID_RESET     0x53
+#define PF53_REVISION_ID_RESET   0x01
+#define PF53_EMREV_RESET         0x00
+#define PF53_PROGRAM_ID_RESET    0x00
 
 static void pf53_reset_regs(PF53PMICState *s)
 {
     memset(s->regs, 0, sizeof(s->regs));
 
-    s->regs[PF53_REG_DEV_ID] = 0x53;
-    s->regs[PF53_REG_REV_ID] = 0x01;
-    s->regs[PF53_REG_EMREV_ID] = 0x00;
-    s->regs[PF53_REG_PROG_ID] = 0x00;
+    s->regs[PF53_DEVICE_ID_REG] = PF53_DEVICE_ID_RESET;
+    s->regs[PF53_REVISION_ID_REG] = PF53_REVISION_ID_RESET;
+    s->regs[PF53_EMREV_REG] = PF53_EMREV_RESET;
+    s->regs[PF53_PROGRAM_ID_REG] = PF53_PROGRAM_ID_RESET;
 
     s->reg_ptr = 0;
     s->have_reg_ptr = false;
@@ -38,14 +42,9 @@ static int pf53_event(I2CSlave *i2c, enum i2c_event event)
     case I2C_START_SEND:
         s->have_reg_ptr = false;
         break;
-
-    case I2C_START_RECV:
-        break;
-
     case I2C_FINISH:
         s->have_reg_ptr = false;
         break;
-
     default:
         break;
     }
@@ -60,15 +59,7 @@ static int pf53_send(I2CSlave *i2c, uint8_t data)
     if (!s->have_reg_ptr) {
         s->reg_ptr = data;
         s->have_reg_ptr = true;
-
-        qemu_log_mask(LOG_GUEST_ERROR,
-                      "%s: set reg_ptr=0x%02x\n",
-                      TYPE_PF53_PMIC, s->reg_ptr);
     } else {
-        qemu_log_mask(LOG_GUEST_ERROR,
-                      "%s: write reg[0x%02x] = 0x%02x\n",
-                      TYPE_PF53_PMIC, s->reg_ptr, data);
-
         s->regs[s->reg_ptr++] = data;
     }
 
@@ -78,14 +69,8 @@ static int pf53_send(I2CSlave *i2c, uint8_t data)
 static uint8_t pf53_recv(I2CSlave *i2c)
 {
     PF53PMICState *s = PF53_PMIC(i2c);
-    uint8_t reg = s->reg_ptr;
-    uint8_t value = s->regs[s->reg_ptr++];
 
-    qemu_log_mask(LOG_GUEST_ERROR,
-                  "%s: read reg[0x%02x] -> 0x%02x\n",
-                  TYPE_PF53_PMIC, reg, value);
-
-    return value;
+    return s->regs[s->reg_ptr++];
 }
 
 static void pf53_pmic_reset(DeviceState *dev)
@@ -100,7 +85,7 @@ static const VMStateDescription vmstate_pf53_pmic = {
     .version_id = 1,
     .minimum_version_id = 1,
     .fields = (const VMStateField[]) {
-        VMSTATE_UINT8_ARRAY(regs, PF53PMICState, 256),
+        VMSTATE_UINT8_ARRAY(regs, PF53PMICState, PF53_PMIC_REG_COUNT),
         VMSTATE_UINT8(reg_ptr, PF53PMICState),
         VMSTATE_BOOL(have_reg_ptr, PF53PMICState),
         VMSTATE_END_OF_LIST()
@@ -122,10 +107,10 @@ static void pf53_pmic_class_init(ObjectClass *klass, const void *data)
 }
 
 static const TypeInfo pf53_pmic_info = {
-    .name          = TYPE_PF53_PMIC,
-    .parent        = TYPE_I2C_SLAVE,
+    .name = TYPE_PF53_PMIC,
+    .parent = TYPE_I2C_SLAVE,
     .instance_size = sizeof(PF53PMICState),
-    .class_init    = pf53_pmic_class_init,
+    .class_init = pf53_pmic_class_init,
 };
 
 static void pf53_pmic_register_types(void)
@@ -134,3 +119,4 @@ static void pf53_pmic_register_types(void)
 }
 
 type_init(pf53_pmic_register_types)
+

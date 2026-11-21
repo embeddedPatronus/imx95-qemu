@@ -8,12 +8,8 @@
 
 #include "qemu/osdep.h"
 #include "qemu/bitops.h"
-#include "qemu/error-report.h"
-#include "qemu/log.h"
-#include "hw/core/qdev-properties.h"
 #include "hw/misc/imx95_wdog32.h"
 #include "migration/vmstate.h"
-#include "hw/core/irq.h"
 #include "system/memory.h"
 
 #define WDOG32_CS        0x00
@@ -26,61 +22,62 @@
 #define WDOG32_CS_ULK   BIT(11)
 #define WDOG32_CS_CMD32  BIT(13)
 
+#define WDOG32_CS_FIXED_BITS \
+    (WDOG32_CS_UPDATE | WDOG32_CS_RCS | WDOG32_CS_ULK | WDOG32_CS_CMD32)
 
-static uint64_t imx95_wdog32_read(void *opaque, hwaddr offset, unsigned size)
+#define WDOG32_UNLOCK_WORD1 0xc520
+#define WDOG32_UNLOCK_WORD2 0xd928
+#define WDOG32_UNLOCK_CMD32 0xd928c520
+#define WDOG32_TOVAL_RESET  0xffff
+
+
+static uint64_t imx95_wdog32_read(void *opaque, hwaddr offset,
+                                  unsigned int size)
 {
     Imx95Wdog32State *s = opaque;
 
     switch (offset) {
     case WDOG32_CS:
-           return s->cs | WDOG32_CS_UPDATE | WDOG32_CS_ULK | WDOG32_CS_RCS | WDOG32_CS_CMD32;
-
+        return s->cs | WDOG32_CS_FIXED_BITS;
     case WDOG32_CNT:
         return s->cnt;
-
     case WDOG32_TOVAL:
         return s->toval;
-
     case WDOG32_WIN:
-       return s->win;
-
+        return s->win;
     default:
-       return 0;
+        return 0;
     }
 }
 
 static void imx95_wdog32_write(void *opaque, hwaddr offset,
-                              uint64_t value, unsigned size)
+                               uint64_t value, unsigned int size)
 {
     Imx95Wdog32State *s = opaque;
     uint32_t v = value;
 
-   switch (offset) {
+    switch (offset) {
     case WDOG32_CS:
-        s->cs = v | WDOG32_CS_UPDATE | WDOG32_CS_ULK | WDOG32_CS_RCS | WDOG32_CS_CMD32;
+        s->cs = v | WDOG32_CS_FIXED_BITS;
         break;
-
     case WDOG32_CNT:
-       s->cnt = v;
-
-        if ((v & 0xffff) == 0xc520) {
+        s->cnt = v;
+        if ((v & UINT16_MAX) == WDOG32_UNLOCK_WORD1) {
             s->unlock_seen_first = true;
-        } else if (s->unlock_seen_first && ((v & 0xffff) == 0xd928)) {
+        } else if (s->unlock_seen_first &&
+                   (v & UINT16_MAX) == WDOG32_UNLOCK_WORD2) {
             s->unlock_seen_first = false;
-            s->cs |= WDOG32_CS_UPDATE | WDOG32_CS_ULK | WDOG32_CS_RCS | WDOG32_CS_CMD32;
-        } else if (v == 0xd928c520) {
-            s->cs |= WDOG32_CS_UPDATE | WDOG32_CS_ULK | WDOG32_CS_RCS | WDOG32_CS_CMD32;
+            s->cs |= WDOG32_CS_FIXED_BITS;
+        } else if (v == WDOG32_UNLOCK_CMD32) {
+            s->cs |= WDOG32_CS_FIXED_BITS;
         }
         break;
-
     case WDOG32_TOVAL:
         s->toval = v;
         break;
-
     case WDOG32_WIN:
         s->win = v;
         break;
-
     default:
         break;
     }
@@ -103,16 +100,12 @@ static const MemoryRegionOps imx95_wdog32_ops = {
 static void imx95_wdog32_reset(DeviceState *dev)
 {
     Imx95Wdog32State *s = IMX95_WDOG32(dev);
-    s->cs = 0;
+
+    s->cs = WDOG32_CS_FIXED_BITS;
     s->cnt = 0;
-    s->toval = 0;
+    s->toval = WDOG32_TOVAL_RESET;
     s->win = 0;
-    s->unlock_seen_first = 0;
-
-
-    s->cs = WDOG32_CS_UPDATE | WDOG32_CS_ULK | WDOG32_CS_RCS | WDOG32_CS_CMD32;
-    s->toval = 0xffff;
-    s->win = 0;
+    s->unlock_seen_first = false;
 }
 
 static void imx95_wdog32_init(Object *obj)
@@ -144,7 +137,7 @@ static void imx95_wdog32_class_init(ObjectClass *oc, const void *data)
 
     device_class_set_legacy_reset(dc, imx95_wdog32_reset);
     dc->vmsd = &vmstate_imx95_wdog32;
-    dc->desc = "i.MX95 wdog32";
+    dc->desc = "i.MX95 WDOG32";
 }
 
 static const TypeInfo imx95_wdog32_types[] = {
@@ -158,3 +151,4 @@ static const TypeInfo imx95_wdog32_types[] = {
 };
 
 DEFINE_TYPES(imx95_wdog32_types)
+
