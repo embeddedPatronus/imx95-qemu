@@ -35,6 +35,7 @@
 #include "hw/misc/imx95_camera_csr.h"
 #include "hw/misc/imx95_camera_noc.h"
 #include "hw/misc/imx95_ccm.h"
+#include "hw/misc/imx95_ddrc.h"
 #include "hw/timer/imx95_sysctr.h"
 #include "hw/misc/imx95_netc_ecam.h"
 #include "hw/misc/imx95_pcie_serdes_ss.h"
@@ -113,6 +114,7 @@ struct FslImx95State {
     MemoryRegion    m7_dtcm_alias;
 
     Imx95CcmState ccm;
+    Imx95DdrcState ddrc;
     Imx95SysctrState sysctr;
     Imx95PcieSerdesSsState pcie_serdes[FSL_IMX95_NUM_PCIES];
     Imx95NetcEcamState netc_ecam[FSL_IMX95_NUM_PCIES];
@@ -241,6 +243,7 @@ enum FslImx95MemoryRegions {
     FSL_IMX95_CAMERA_CSR,
     FSL_IMX95_CAMERA_NOC,
     FSL_IMX95_CCM,
+    FSL_IMX95_DDRC,
     FSL_IMX95_DDRMIX,
     FSL_IMX95_DISPLAYMIX_IRQSTEER,
     FSL_IMX95_EDMA1,

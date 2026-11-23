@@ -62,6 +62,10 @@ static void imx95_evk_init(MachineState *machine)
     }
 
     object_initialize_child(OBJECT(machine), "soc", &s->soc, TYPE_FSL_IMX95);
+    qdev_prop_set_uint64(DEVICE(&s->soc.ddrc), "dram-base",
+                         FSL_IMX95_RAM_START);
+    qdev_prop_set_uint64(DEVICE(&s->soc.ddrc), "dram-size",
+                         machine->ram_size);
 
     di = drive_get(IF_SD, 0, 0);
     imx95_bootrom_load(&bootrom, di ? blk_by_legacy_dinfo(di) : NULL,
@@ -126,4 +130,5 @@ static const TypeInfo imx95_evk_machine_types[] = {
 };
 
 DEFINE_TYPES(imx95_evk_machine_types)
+
 

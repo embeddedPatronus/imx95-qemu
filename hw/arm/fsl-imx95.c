@@ -69,6 +69,7 @@ static const FslImx95MemoryMapEntry fsl_imx95_memmap[] = {
     [FSL_IMX95_CAMERA_CSR] = { 0x4ac10000, 64 * KiB, "imx95.camera-csr" },
     [FSL_IMX95_CAMERA_NOC] = { 0x4aff0000, 64 * KiB, "imx95.camera-noc" },
     [FSL_IMX95_CCM] = { 0x44450000, 64 * KiB, "imx95.ccm" },
+    [FSL_IMX95_DDRC] = { 0x4e080000, 128 * KiB, "imx95.ddrc" },
     [FSL_IMX95_DDRMIX] = { 0x5d000000, 32 * MiB, "imx95.ddrmix" },
     [FSL_IMX95_DISPLAYMIX_IRQSTEER] = {
         0x4b0b0000, 4 * KiB, "imx95.displaymix-irqsteer"
@@ -430,6 +431,7 @@ static void fsl_imx95_init(Object *obj)
     object_initialize_child(obj, "usb1", &s->usb1, TYPE_USB_DWC3);
     object_initialize_child(obj, "usb2", &s->usb2, TYPE_CHIPIDEA);
     object_initialize_child(obj, "ccm", &s->ccm, TYPE_IMX95_CCM);
+    object_initialize_child(obj, "ddrc", &s->ddrc, TYPE_IMX95_DDRC);
     object_initialize_child(obj, "sysctr", &s->sysctr, TYPE_IMX95_SYSCTR);
     for (i = 0; i < ARRAY_SIZE(s->pcie_serdes); i++) {
         g_autofree char *serdes_name = g_strdup_printf("pcie-serdes%d", i);
@@ -1098,7 +1100,14 @@ static bool fsl_imx95_realize_peripherals(FslImx95State *s,
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->ccm), errp)) {
         return false;
     }
-    sysbus_mmio_map(SYS_BUS_DEVICE(&s->ccm), 0, fsl_imx95_memmap[FSL_IMX95_CCM].addr);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->ccm), 0,
+                    fsl_imx95_memmap[FSL_IMX95_CCM].addr);
+
+    if (!sysbus_realize(SYS_BUS_DEVICE(&s->ddrc), errp)) {
+        return false;
+    }
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->ddrc), 0,
+                    fsl_imx95_memmap[FSL_IMX95_DDRC].addr);
 
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->sysctr), errp)) {
         return false;
@@ -1217,6 +1226,7 @@ static void fsl_imx95_create_unimplemented_devices(void)
         case FSL_IMX95_CAMERA_CSR:
         case FSL_IMX95_CAMERA_NOC:
         case FSL_IMX95_CCM:
+        case FSL_IMX95_DDRC:
         case FSL_IMX95_HSIO_BLK_CTRL:
         case FSL_IMX95_DDRMIX:
         case FSL_IMX95_ELE_MU:
@@ -1327,4 +1337,5 @@ static const TypeInfo fsl_imx95_types[] = {
 };
 
 DEFINE_TYPES(fsl_imx95_types)
+
 
