@@ -22,6 +22,10 @@
 #define IMX95_FRACTPLL_BLOCK_SIZE         0x100
 
 #define IMX95_FRACTPLL_STATUS_LOCK BIT(0)
+
+#define IMX95_FRACTPLL_DRAM_PLL_OFFSET  0x700
+#define IMX95_FRACTPLL_CTRL_POWERUP     BIT(0)
+#define IMX95_FRACTPLL_CTRL_CLKMUX_EN   BIT(1)
 #define IMX95_FRACTPLL_DFS_ALL_OK  UINT32_MAX
 
 #define IMX95_SYSPLL1_NUMERATOR_RESET   8U
@@ -186,6 +190,9 @@ static void imx95_fractpll_reset(DeviceState *dev)
         IMX95_SYSPLL1_DFS1_DIV_RESET;
     s->regs[imx95_fractpll_reg_index(IMX95_FRACTPLL_DFS2_DIV_OFFSET)] =
         IMX95_SYSPLL1_DFS2_DIV_RESET;
+
+    s->regs[imx95_fractpll_reg_index(IMX95_FRACTPLL_DRAM_PLL_OFFSET)] =
+        IMX95_FRACTPLL_CTRL_POWERUP | IMX95_FRACTPLL_CTRL_CLKMUX_EN;
 }
 
 static void imx95_fractpll_init(Object *obj)
