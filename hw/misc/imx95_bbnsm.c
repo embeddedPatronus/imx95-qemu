@@ -133,12 +133,20 @@ static const MemoryRegionOps imx95_bbnsm_ops = {
     },
 };
 
-/* The RTC and alarm are not modelled */
+/* The RTC and alarm are not modelled.
+ * The GPRs are battery backed so we keep them
+ * across reset for SM shutdown record
+ */
 static void imx95_bbnsm_reset(DeviceState *dev)
 {
     Imx95BbnsmState *s = IMX95_BBNSM(dev);
+    unsigned int first = imx95_bbnsm_reg_index(BBNSM_GPR_BASE);
+    unsigned int count = (BBNSM_GPR_END - BBNSM_GPR_BASE) / sizeof(uint32_t);
+    uint32_t gpr[(BBNSM_GPR_END - BBNSM_GPR_BASE) / sizeof(uint32_t)];
 
+    memcpy(gpr, &s->regs[first], count * sizeof(uint32_t));
     memset(s->regs, 0, sizeof(s->regs));
+    memcpy(&s->regs[first], gpr, count * sizeof(uint32_t));
     s->read_count = 0;
     s->write_count = 0;
     s->regs[imx95_bbnsm_reg_index(BBNSM_FEATURES)] =
