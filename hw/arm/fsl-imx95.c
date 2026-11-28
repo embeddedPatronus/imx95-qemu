@@ -1070,6 +1070,10 @@ static bool fsl_imx95_realize_peripherals(FslImx95State *s,
         return false;
     }
     sysbus_mmio_map(SYS_BUS_DEVICE(&s->fspi), 0, fsl_imx95_memmap[FSL_IMX95_FSPI1_REG].addr);
+    sysbus_mmio_map(SYS_BUS_DEVICE(&s->fspi), 1,
+                    fsl_imx95_memmap[FSL_IMX95_FSPI1_MMAP].addr);
+    sysbus_connect_irq(SYS_BUS_DEVICE(&s->fspi), 0,
+                       qdev_get_gpio_in(gicdev, FSL_IMX95_FSPI1_IRQ));
     if (!sysbus_realize(SYS_BUS_DEVICE(&s->smmuv3), errp)) {
         return false;
     }
@@ -1232,6 +1236,7 @@ static void fsl_imx95_create_unimplemented_devices(void)
         case FSL_IMX95_ELE_MU:
         case FSL_IMX95_FSB:
         case FSL_IMX95_FRACTPLL:
+        case FSL_IMX95_FSPI1_MMAP:
         case FSL_IMX95_FSPI1_REG:
         case FSL_IMX95_GIC_DIST:
         case FSL_IMX95_GIC_ITS:

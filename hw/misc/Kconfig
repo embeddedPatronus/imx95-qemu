@@ -327,6 +327,7 @@ config IMX95_SMMUV3
 
 config IMX95_FSPI
     bool
+    select SSI
 
 config IMX95_SRC_GEN
     bool

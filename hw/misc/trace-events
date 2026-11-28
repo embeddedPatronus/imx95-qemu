@@ -487,3 +487,11 @@ imx95_a55_started(unsigned cpu, uint64_t entry) "CPU%u started at entry=0x%"PRIx
 
 # imx95_src_gen.c
 imx95_src_gen_power(uint64_t slice, uint32_t sw_ctrl, uint32_t func_stat) "slice=0x%04"PRIx64" SLICE_SW_CTRL=0x%08x FUNC_STAT=0x%08x"
+
+# imx95_fspi.c
+imx95_fspi_instr(unsigned seq, unsigned idx, unsigned opcode, unsigned lines, unsigned operand) "seq %u instr %u: opcode 0x%02x, %u line(s), operand 0x%02x"
+imx95_fspi_ip(uint32_t sfar, unsigned seq, unsigned num, uint32_t datsz) "IP command: SFAR 0x%08x, sequence %u (+%u), %u data bytes"
+imx95_fspi_ahb(unsigned cs, uint32_t addr, uint32_t len, unsigned seq) "AHB read: flash %u, address 0x%08x, %u bytes, sequence %u"
+imx95_fspi_error(const char *src, unsigned code, unsigned seq) "%s command error: code 0x%x, sequence %u"
+imx95_fspi_lut_lock(bool locked) "LUT %d"
+

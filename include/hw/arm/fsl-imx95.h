@@ -154,6 +154,7 @@ I2CBus *fsl_imx95_get_i2c_bus(FslImx95State *s, unsigned int index);
 BusState *fsl_imx95_get_usdhc_bus(FslImx95State *s, unsigned int index);
 
 enum FslImx95Irqs {
+    FSL_IMX95_FSPI1_IRQ             = 48,
     FSL_IMX95_LPUART_SM_IRQ         = 19,
     FSL_IMX95_LPUART_M7_IRQ         = 64,
     FSL_IMX95_SYSCTR_IRQ            = 72,

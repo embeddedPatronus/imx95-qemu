@@ -25,6 +25,8 @@
 #define IMX95_SM_IMAGE_MAX_SIZE      (256 * KiB)
 
 #define IMX95_MMCSD_CONTAINER_OFFSET 0x8000ULL
+#define IMX95_NOR_CONTAINER_OFFSET   0x1000ULL
+#define IMX95_NOR_SND_SET_SKIP       0x1000ULL
 
 #define IMX95_ROM_SND_BOOT_OFFSET_SHIFT 8
 #define IMX95_ROM_SND_BOOT_OFFSET_MASK  0xffU
@@ -68,7 +70,11 @@
 #define IMX95_ROM_CARD_ADDR_MODE_DEFAULT 0U
 #define IMX95_ROM_BOOT_DEV_STATE_ACTIVE  1U
 #define IMX95_ROM_BOOT_DEV_INSTANCE_0    0U
+#define IMX95_ROM_BOOT_DEV_INSTANCE_1    1U
+#define IMX95_ROM_BOOT_DEV_TYPE_SD       1U
 #define IMX95_ROM_BOOT_DEV_TYPE_MMC      2U
+#define IMX95_ROM_BOOT_DEV_TYPE_NOR      4U
+#define IMX95_ROM_NOR_PAGE_SIZE          256U
 #define IMX95_ROM_IMG_TYPE_EXEC      0U
 #define IMX95_ROM_CPU_M7P            1U
 #define IMX95_ROM_CPU_A55C0          2U
@@ -302,41 +308,48 @@ static unsigned int rom_select_set(const Imx95ContainerSelection *set1,
     return primary;
 }
 
-static bool rom_load_from_sd(Imx95BootRomInfo *info, BlockBackend *blk,
-                             uint32_t boot_cfg8, Error **errp)
+/* Load from eMMC or NOR */
+static bool rom_load_from_medium(Imx95BootRomInfo *info, BlockBackend *blk,
+                                 uint64_t first_set, uint64_t snd_skip,
+                                 const char *what, uint32_t boot_cfg8,
+                                 Error **errp)
 {
-    int64_t sd_size = blk_getlength(blk);
+    int64_t blk_size = blk_getlength(blk);
     Imx95ContainerMedia media = { .read = rom_blk_read, .opaque = blk };
     Imx95ContainerSelection probe[2];
     Imx95ContainerSelection sel;
-    uint64_t set_off[2] = { IMX95_MMCSD_CONTAINER_OFFSET, 0 };
+    uint64_t set_off[2] = { first_set, 0 };
     bool valid[2] = { false, false };
     unsigned int primary;
+    g_autofree char *sm_name = g_strdup_printf("imx95.sm.%s", what);
+    g_autofree char *spl_name = g_strdup_printf("imx95.a55-spl.%s", what);
+    g_autofree char *m7_name = g_strdup_printf("imx95.m7.%s", what);
 
-    if (sd_size <= 0) {
-        error_setg(errp, "the SD image has zero or unknown size");
+    if (blk_size <= 0) {
+        error_setg(errp, "the %s image has zero or unknown size", what);
         return false;
     }
-    media.size = sd_size;
+    media.size = blk_size;
 
-    /*
-     * The 1st set is at 32 KiB, the 2nd one where the fuse says
-     */
+    /* The 1st set is at the device offset, the 2nd one where the fuse says */
     valid[0] = imx95_container_probe_set(&media, set_off[0], &probe[0]);
-    if (rom_snd_boot_offset(boot_cfg8, &set_off[1]) &&
-        set_off[1] != set_off[0]) {
-        valid[1] = imx95_container_probe_set(&media, set_off[1], &probe[1]);
+    if (rom_snd_boot_offset(boot_cfg8, &set_off[1])) {
+        set_off[1] += snd_skip;
+        if (set_off[1] != set_off[0]) {
+            valid[1] = imx95_container_probe_set(&media, set_off[1],
+                                                 &probe[1]);
+        }
     }
 
     if (!valid[0] && !valid[1]) {
         if (!imx95_container_find_images(&media, set_off[0], false, &sel,
                                          errp)) {
-            error_prepend(errp, "no bootable container set at SD offset "
-                          "0x%llx: ", IMX95_MMCSD_CONTAINER_OFFSET);
+            error_prepend(errp, "no bootable container set at %s offset "
+                          "0x%" PRIx64 ": ", what, first_set);
             return false;
         }
-        error_setg(errp, "no OEM container in the container set at SD offset "
-                   "0x%llx", IMX95_MMCSD_CONTAINER_OFFSET);
+        error_setg(errp, "no OEM container in the container set at %s offset "
+                   "0x%" PRIx64, what, first_set);
         return false;
     }
 
@@ -349,8 +362,8 @@ static bool rom_load_from_sd(Imx95BootRomInfo *info, BlockBackend *blk,
 
     if (!imx95_container_find_images(&media, set_off[primary], false, &sel,
                                      errp)) {
-        error_prepend(errp, "no bootable container set at SD offset 0x%"
-                      PRIx64 ": ", set_off[primary]);
+        error_prepend(errp, "no bootable container set at %s offset 0x%"
+                      PRIx64 ": ", what, set_off[primary]);
         return false;
     }
     if (sel.end > UINT32_MAX) {
@@ -362,7 +375,7 @@ static bool rom_load_from_sd(Imx95BootRomInfo *info, BlockBackend *blk,
     info->img_set_offset = (uint32_t)set_off[primary];
     info->img_set_end = (uint32_t)sel.end;
 
-    if (!rom_load_payload(blk, &sel.cm33, "imx95.sm.sd", "cm33", true, errp)) {
+    if (!rom_load_payload(blk, &sel.cm33, sm_name, "cm33", true, errp)) {
         return false;
     }
 
@@ -371,14 +384,14 @@ static bool rom_load_from_sd(Imx95BootRomInfo *info, BlockBackend *blk,
                    "set");
         return false;
     }
-    if (!rom_load_payload(blk, &sel.a55_spl, "imx95.a55-spl.sd", "a55-spl",
+    if (!rom_load_payload(blk, &sel.a55_spl, spl_name, "a55-spl",
                           false, errp)) {
         return false;
     }
     rom_note_spl(info, &sel.a55_spl);
 
     if (sel.have_cm7) {
-        if (!rom_load_payload(blk, &sel.cm7, "imx95.m7.sd", "m7", false,
+        if (!rom_load_payload(blk, &sel.cm7, m7_name, "m7", false,
                               errp)) {
             return false;
         }
@@ -390,9 +403,9 @@ static bool rom_load_from_sd(Imx95BootRomInfo *info, BlockBackend *blk,
     return true;
 }
 
-static bool rom_load(Imx95BootRomInfo *info, BlockBackend *sd,
-                     const char *kernel_filename, uint32_t boot_cfg8,
-                     Error **errp)
+static bool rom_load(Imx95BootRomInfo *info, Imx95BootDevice dev,
+                     BlockBackend *medium, const char *kernel_filename,
+                     uint32_t boot_cfg8, Error **errp)
 {
     /* -kernel: a container set, or else a raw SM image */
     if (kernel_filename) {
@@ -421,25 +434,55 @@ static bool rom_load(Imx95BootRomInfo *info, BlockBackend *sd,
         return true;
     }
 
-    trace_imx95_bootrom_source("sd");
-    if (!sd) {
-        error_setg(errp, "no boot medium: provide either -kernel flash.bin "
-                   "or -drive if=sd,index=0,file=<sd.img>");
-        return false;
+    switch (dev) {
+    case IMX95_BOOT_DEVICE_NOR:
+        trace_imx95_bootrom_source("nor");
+        if (!medium) {
+            error_setg(errp, "no boot medium: boot-device=nor needs "
+                       "-drive if=mtd,index=0,file=<nor.img>,format=raw");
+            return false;
+        }
+        info->dev_type = IMX95_ROM_BOOT_DEV_TYPE_NOR;
+        info->dev_inst = IMX95_ROM_BOOT_DEV_INSTANCE_0;
+        info->dev_page_size = IMX95_ROM_NOR_PAGE_SIZE;
+        return rom_load_from_medium(info, medium, IMX95_NOR_CONTAINER_OFFSET,
+                                    IMX95_NOR_SND_SET_SKIP, "nor", boot_cfg8,
+                                    errp);
+    case IMX95_BOOT_DEVICE_SD:
+    case IMX95_BOOT_DEVICE_EMMC:
+        trace_imx95_bootrom_source(dev == IMX95_BOOT_DEVICE_SD ? "sd" : "emmc");
+        if (!medium) {
+            error_setg(errp, "no boot medium: provide either -kernel flash.bin "
+                       "or -drive if=sd,index=0,file=<sd.img>");
+            return false;
+        }
+        if (dev == IMX95_BOOT_DEVICE_SD) {
+            info->dev_type = IMX95_ROM_BOOT_DEV_TYPE_SD;
+            info->dev_inst = IMX95_ROM_BOOT_DEV_INSTANCE_1;
+        } else {
+            info->dev_type = IMX95_ROM_BOOT_DEV_TYPE_MMC;
+            info->dev_inst = IMX95_ROM_BOOT_DEV_INSTANCE_0;
+        }
+        info->dev_page_size = IMX95_ROM_MMC_BLOCK_SIZE;
+        return rom_load_from_medium(info, medium, IMX95_MMCSD_CONTAINER_OFFSET,
+                                    0, "sd", boot_cfg8, errp);
     }
-
-    return rom_load_from_sd(info, sd, boot_cfg8, errp);
+    g_assert_not_reached();
 }
 
-bool imx95_bootrom_load(Imx95BootRomInfo *info, BlockBackend *sd,
-                        const char *kernel_filename, uint32_t boot_cfg8,
-                        Error **errp)
+bool imx95_bootrom_load(Imx95BootRomInfo *info, Imx95BootDevice dev,
+                        BlockBackend *medium, const char *kernel_filename,
+                        uint32_t boot_cfg8, Error **errp)
 {
     Error *local_err = NULL;
 
     memset(info, 0, sizeof(*info));
 
-    if (!rom_load(info, sd, kernel_filename, boot_cfg8, &local_err)) {
+    info->dev_type = IMX95_ROM_BOOT_DEV_TYPE_MMC;
+    info->dev_inst = IMX95_ROM_BOOT_DEV_INSTANCE_0;
+    info->dev_page_size = IMX95_ROM_MMC_BLOCK_SIZE;
+
+    if (!rom_load(info, dev, medium, kernel_filename, boot_cfg8, &local_err)) {
         error_propagate_prepend(errp, local_err, "imx95 boot ROM: ");
         return false;
     }
@@ -496,10 +539,8 @@ void imx95_bootrom_add_handover(const Imx95BootRomInfo *info)
              IMX95_ROM_CARD_ADDR_MODE_DEFAULT);
     passover[IMX95_ROM_PASSOVER_BOOT_STATE_OFF] =
         IMX95_ROM_BOOT_DEV_STATE_ACTIVE;
-    passover[IMX95_ROM_PASSOVER_BOOT_INST_OFF] = IMX95_ROM_BOOT_DEV_INSTANCE_0;
-
-    /* The boot device is always reported as MMC instance 0 */
-    passover[IMX95_ROM_PASSOVER_BOOT_TYPE_OFF] = IMX95_ROM_BOOT_DEV_TYPE_MMC;
+    passover[IMX95_ROM_PASSOVER_BOOT_INST_OFF] = info->dev_inst;
+    passover[IMX95_ROM_PASSOVER_BOOT_TYPE_OFF] = info->dev_type;
     passover[IMX95_ROM_PASSOVER_BOOT_STAGE_OFF] =
         IMX95_ROM_BOOT_STAGE_PRIMARY;
     passover[IMX95_ROM_PASSOVER_IMG_SET_SEL_OFF] = info->img_set;
@@ -507,8 +548,7 @@ void imx95_bootrom_add_handover(const Imx95BootRomInfo *info)
              info->img_set_end);
     stl_le_p(passover + IMX95_ROM_PASSOVER_ROM_VERSION_OFF,
              IMX95_ROM_HANDOVER_VER);
-    stl_le_p(passover + IMX95_ROM_PASSOVER_DEV_PAGE_OFF,
-             IMX95_ROM_MMC_BLOCK_SIZE);
+    stl_le_p(passover + IMX95_ROM_PASSOVER_DEV_PAGE_OFF, info->dev_page_size);
     stl_le_p(passover + IMX95_ROM_PASSOVER_CNT_HDR_OFF, info->img_set_offset);
     stl_le_p(passover + IMX95_ROM_PASSOVER_IMG_OFS_OFF, info->img_set_offset);
 

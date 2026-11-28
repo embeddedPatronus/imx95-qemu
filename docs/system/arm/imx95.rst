@@ -27,7 +27,7 @@ The ``imx95-evk`` machine implements the following devices:
  * 2 PCI Express root complexes (PCIe0 and PCIe1) with the SerDes subsystem
    registers, an unrolled iATU and a requester ID look-up table
  * 1 Designware USB 3 Controller and 1 ChipIdea USB 2 Controller
- * 1 FlexSPI Controller (register model only, no flash device)
+ * 1 FlexSPI Controller with a NOR flash
  * 1 ADC
  * System Counter (SYS_CTR)
  * System Reset Controller (SRC), Clock Control Module (CCM) and
@@ -68,6 +68,19 @@ medium, as the boot ROM does, and starts the System Manager. The System
 Manager then starts the Cortex-A55 cores at the SPL. The standard ``-kernel``
 functionality to start a Linux kernel directly is not used.
 
+The boot device is chosen with the ``boot-device`` machine property, which
+stands for the ``BOOT_MODE`` pins and fuses of the real chip:
+
+=========== ================================== ========================
+Value       Boot medium                        Where the ROM looks
+=========== ================================== ========================
+``emmc``    ``-drive if=sd,index=0`` (default) 32 KiB, uSDHC1 eMMC
+``nor``     ``-drive if=mtd,index=0``          4 KiB, FlexSPI NOR
+=========== ================================== ========================
+
+The boot ROM reports the device in the passover data (type, instance and
+page size), and the SPL picks its loader from it, as on the real SoC.
+
 Boot from an SD card image
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -91,6 +104,29 @@ Use the reported pseudo terminal to access the System Manager console:
 .. code-block:: bash
 
    $ screen /dev/pts/N
+
+Boot from the NOR flash
+~~~~~~~~~~~~~~~~~~~~~~~
+
+With ``boot-device=nor`` the ROM boots from the flash that sits on the
+FlexSPI controller, chip select A1.
+
+The flash model is ``n25q00`` (128 MiB, quad) by default, the size of the
+MT35XU01G of the EVK. The image must have exactly the size of the chip, so a
+smaller flash image is padded with ``0xff``, as an erased flash reads. Another
+``m25p80`` model can be chosen with ``nor-model``, if the SPL knows its JEDEC
+id:
+
+.. code-block:: bash
+
+   $ truncate -s 128M nor.img
+   $ dd if=flash.bin of=nor.img bs=1k seek=4 conv=notrunc
+   $ qemu-system-aarch64 -M imx95-evk,boot-device=nor \
+       -display none -serial pty -serial stdio \
+       -drive file=nor.img,if=mtd,format=raw
+
+The EVK has an octal Micron MT35XU01G, which ``m25p80`` cannot model, so
+a quad flash of the same size is used as an alternative. 
 
 Cortex-M7
 ---------
